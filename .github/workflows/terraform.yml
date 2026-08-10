@@ -1,0 +1,89 @@
+name: AWS Monitoring Infrastructure
+
+on:
+
+  pull_request:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+
+
+permissions:
+
+  contents: read
+
+
+jobs:
+
+  terraform:
+
+    name: Terraform
+
+    runs-on: ubuntu-latest
+
+
+    defaults:
+
+      run:
+
+        working-directory: terraform
+
+
+    steps:
+
+
+      # ==========================================
+      # CHECKOUT
+      # ==========================================
+
+      - name: Checkout Repository
+
+        uses: actions/checkout@v4
+
+
+      # ==========================================
+      # TERRAFORM
+      # ==========================================
+
+      - name: Setup Terraform
+
+        uses: hashicorp/setup-terraform@v3
+
+
+      # ==========================================
+      # INIT
+      # ==========================================
+
+      - name: Terraform Init
+
+        run: terraform init
+
+
+      # ==========================================
+      # FORMAT
+      # ==========================================
+
+      - name: Terraform Format
+
+        run: terraform fmt -check
+
+
+      # ==========================================
+      # VALIDATE
+      # ==========================================
+
+      - name: Terraform Validate
+
+        run: terraform validate
+
+
+      # ==========================================
+      # PLAN
+      # ==========================================
+
+      - name: Terraform Plan
+
+        run: terraform plan
