@@ -12,7 +12,7 @@ variable "ami_id" {
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
-  default     = "t3.small"
+  default     = "t2.small"
 }
 
 variable "key_name" {
@@ -21,11 +21,11 @@ variable "key_name" {
 }
 
 variable "allowed_ssh_cidr" {
-  description = "Public IP allowed to SSH"
+  description = "Public SSH CIDR block, for example 203.0.113.45/32"
   type        = string
 }
 
 variable "allowed_grafana_cidr" {
-  description = "Public IP allowed to access Grafana"
+  description = "Public Grafana CIDR block, for example 203.0.113.45/32"
   type        = string
 }
