@@ -1,0 +1,63 @@
+name: AWS Monitoring Ephemeral Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      auto_destroy:
+        description: "Automatically destroy after the wait period"
+        type: boolean
+        default: true
+      destroy_after_minutes:
+        description: "Minutes to wait before destroy"
+        type: number
+        default: 5
+      tf_vars_file:
+        description: "Optional tfvars file path relative to aws-monitoring-platform/terraform"
+        default: ""
+
+jobs:
+  deploy:
+    name: Deploy and optional destroy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: aws-monitoring-platform/terraform
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: |
+          if [ -n "${{ github.event.inputs.tf_vars_file }}" ]; then
+            terraform apply -auto-approve -var-file="${{ github.event.inputs.tf_vars_file }}"
+          else
+            terraform apply -auto-approve
+          fi
+
+      - name: Show Grafana URL
+        run: |
+          url=$(terraform output -raw grafana_url)
+          echo "Grafana URL: $url"
+          echo "## Grafana UI\n$url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wait before destroy
+        if: ${{ github.event.inputs.auto_destroy }}
+        run: |
+          echo "Waiting ${{ github.event.inputs.destroy_after_minutes }} minutes before destroy."
+          sleep $(( ${{ github.event.inputs.destroy_after_minutes }} * 60 ))
+
+      - name: Terraform Destroy
+        if: ${{ github.event.inputs.auto_destroy }}
+        run: |
+          if [ -n "${{ github.event.inputs.tf_vars_file }}" ]; then
+            terraform destroy -auto-approve -var-file="${{ github.event.inputs.tf_vars_file}}"
+          else
+            terraform destroy -auto-approve
+          fi
