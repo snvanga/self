@@ -91,35 +91,20 @@ chown -R prometheus:prometheus \
 # PROMETHEUS CONFIGURATION
 # =========================================================
 cat > /etc/prometheus/prometheus.yml <<EOF
-
 global:
-
   scrape_interval: 15s
-
   evaluation_interval: 15s
-
 scrape_configs:
-
   # Prometheus itself
-
   - job_name: "prometheus"
-
     static_configs:
-
       - targets:
-
           - "localhost:9090"
-
   # Node Exporter
-
   - job_name: "node_exporter"
-
     static_configs:
-
       - targets:
-
           - "localhost:9100"
-
 EOF
 chown prometheus:prometheus \
 /etc/prometheus/prometheus.yml
@@ -127,33 +112,21 @@ chown prometheus:prometheus \
 # PROMETHEUS SERVICE
 # =========================================================
 cat > /etc/systemd/system/prometheus.service <<EOF
-
 [Unit]
-
 Description=Prometheus Monitoring Server
-
 After=network.target
 
 [Service]
-
 User=prometheus
-
 Group=prometheus
-
 Type=simple
-
 ExecStart=/usr/local/bin/prometheus \
-
---config.file=/etc/prometheus/prometheus.yml \
-
---storage.tsdb.path=/var/lib/prometheus
-
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/var/lib/prometheus
 Restart=on-failure
 
 [Install]
-
 WantedBy=multi-user.target
-
 EOF
 systemctl daemon-reload
 systemctl enable prometheus
@@ -163,21 +136,40 @@ systemctl start prometheus
 # =========================================================
 echo "Installing Grafana..."
 mkdir -p /etc/apt/keyrings
-wget -q -O \
-/etc/apt/keyrings/grafana.asc \
-https://apt.grafana.com/gpg-full.key
-chmod 644 \
-/etc/apt/keyrings/grafana.asc
-echo "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main" \
-> /etc/apt/sources.list.d/grafana.list
+wget -q -O /etc/apt/keyrings/grafana.asc https://apt.grafana.com/gpg-full.key
+chmod 644 /etc/apt/keyrings/grafana.asc
+cat > /etc/apt/sources.list.d/grafana.list <<EOF
+deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main
+EOF
 apt-get update -y
 apt-get install -y grafana
+
 # =========================================================
 # START GRAFANA
 # =========================================================
 systemctl daemon-reload
 systemctl enable grafana-server
 systemctl start grafana-server
+
+# Verify Grafana service
+if ! systemctl is-active --quiet grafana-server; then
+  echo "Grafana service failed to start"
+  systemctl status grafana-server --no-pager || true
+  journalctl -u grafana-server --no-pager | tail -n 40 || true
+  exit 1
+fi
+
+echo "Grafana service is active"
+
+echo "Checking Grafana HTTP health on localhost:3000"
+if ! curl --fail --silent --show-error --max-time 10 http://localhost:3000/api/health; then
+  echo "Grafana HTTP health check failed"
+  journalctl -u grafana-server --no-pager | tail -n 80 || true
+  netstat -tlnp 2>/dev/null | grep 3000 || ss -tlnp | grep 3000 || true
+  exit 1
+fi
+
+echo "Grafana HTTP health check passed"
 # =========================================================
 # WAIT
 # =========================================================
