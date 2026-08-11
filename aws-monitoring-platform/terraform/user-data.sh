@@ -136,13 +136,27 @@ systemctl start prometheus
 # =========================================================
 echo "Installing Grafana..."
 mkdir -p /etc/apt/keyrings
-wget -q -O /etc/apt/keyrings/grafana.asc https://apt.grafana.com/gpg-full.key
-chmod 644 /etc/apt/keyrings/grafana.asc
+curl -fsSL https://apt.grafana.com/gpg.key | gpg --dearmor > /etc/apt/keyrings/grafana.gpg
+chmod 644 /etc/apt/keyrings/grafana.gpg
 cat > /etc/apt/sources.list.d/grafana.list <<EOF
-deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main
+deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main
 EOF
 apt-get update -y
 apt-get install -y grafana
+
+if ! dpkg -l grafana >/dev/null 2>&1; then
+  echo "Grafana package failed to install"
+  apt-cache policy grafana || true
+  ls -l /etc/apt/sources.list.d/grafana.list || true
+  grep -R "grafana" /var/log/apt 2>/dev/null || true
+  exit 1
+fi
+
+if [ ! -f /lib/systemd/system/grafana-server.service ] && [ ! -f /etc/systemd/system/grafana-server.service ]; then
+  echo "Grafana systemd service file not found"
+  ls -l /lib/systemd/system/grafana-server.service /etc/systemd/system/grafana-server.service 2>/dev/null || true
+  exit 1
+fi
 
 # =========================================================
 # START GRAFANA
