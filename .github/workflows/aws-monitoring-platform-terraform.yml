@@ -54,6 +54,22 @@ jobs:
           else
             echo "Skipping plan: terraform.tfvars not found"
           fi
-      # - name: Terraform Destroy
-      #   if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_destroy == 'true' }}
-      #   run: terraform destroy -auto-approve -var-file=terraform.tfvars.example -input=false
+      - name: Terraform Apply
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_destroy == 'true' }}
+        run: |
+          if [ -f terraform.tfvars ]; then
+            terraform apply -var-file=terraform.tfvars -auto-approve
+          else
+            echo "Skipping apply: terraform.tfvars not found"
+          fi
+      - name: Wait 5 minutes
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_destroy == 'true' }}
+        run: sleep 300
+      - name: Terraform Destroy
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_destroy == 'true' }}
+        run: |
+          if [ -f terraform.tfvars ]; then
+            terraform destroy -var-file=terraform.tfvars -auto-approve
+          else
+            echo "Skipping destroy: terraform.tfvars not found"
+          fi
