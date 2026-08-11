@@ -39,7 +39,7 @@ jobs:
       - name: Terraform Validate
         run: |
           if [ -f terraform.tfvars ]; then
-            terraform validate -var-file=terraform.tfvars -input=false
+            terraform validate -var-file=terraform.tfvars
           else
             echo "Skipping validate: terraform.tfvars not found"
           fi
