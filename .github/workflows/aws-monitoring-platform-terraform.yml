@@ -1,92 +1,41 @@
 name: AWS Monitoring Infrastructure
 
 on:
-
   workflow_dispatch:
     inputs:
       run_destroy:
         description: "Run terraform destroy after plan"
         type: boolean
         default: false
-
   pull_request:
     branches:
       - main
-
   push:
     branches:
       - main
       - siva-test
 
-
 permissions:
-
   contents: read
 
-
 jobs:
-
   terraform:
-
     name: Terraform
-
     runs-on: ubuntu-latest
-
     env:
       TF_VAR_enable_ssh_health_check: 'false'
-
     defaults:
-
       run:
-
         working-directory: aws-monitoring-platform/terraform
-
-
     steps:
-
-
-      # ==========================================
-      # CHECKOUT
-      # ==========================================
-
       - name: Checkout Repository
-
         uses: actions/checkout@v4
-
-
-      # ==========================================
-      # TERRAFORM
-      # ==========================================
-
       - name: Setup Terraform
-
         uses: hashicorp/setup-terraform@v3
-
-
-      # ==========================================
-      # INIT
-      # ==========================================
-
       - name: Terraform Init
-
-      - name: Terraform Init
-
         run: terraform init
-
-
-      # ==========================================
-      # FORMAT
-      # ==========================================
-
       - name: Terraform Format
-
         run: terraform fmt -check
-
-
-      # ==========================================
-      # VALIDATE
-      # ==========================================
-
       - name: Terraform Validate
         run: |
           if [ -f terraform.tfvars ]; then
@@ -94,12 +43,6 @@ jobs:
           else
             echo "Skipping validate: terraform.tfvars not found"
           fi
-
-
-      # ==========================================
-      # PLAN
-      # ==========================================
-
       - name: Terraform Plan
         run: |
           if [ -f terraform.tfvars ]; then
@@ -107,11 +50,6 @@ jobs:
           else
             echo "Skipping plan: terraform.tfvars not found"
           fi
-
-      # ==========================================
-      # DESTROY (manual only)
-      # ==========================================
-
       # - name: Terraform Destroy
       #   if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_destroy == 'true' }}
       #   run: terraform destroy -auto-approve -var-file=terraform.tfvars.example -input=false
