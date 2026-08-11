@@ -6,5 +6,5 @@ instance_type = "t2.small"
 
 key_name = "siva-test"
 
-allowed_ssh_cidr   = "49.204.9.78/32"
+allowed_ssh_cidr     = "49.204.9.78/32"
 allowed_grafana_cidr = "49.204.9.78/32"

@@ -14,7 +14,7 @@ data "http" "grafana_health" {
 }
 
 data "external" "service_status" {
-  count = var.enable_ssh_health_check ? 1 : 0
-  program = ["bash", "${path.module}/scripts/check_services.sh", aws_instance.monitoring.public_ip, var.ssh_user, var.ssh_private_key_path]
+  count      = var.enable_ssh_health_check ? 1 : 0
+  program    = ["bash", "${path.module}/scripts/check_services.sh", aws_instance.monitoring.public_ip, var.ssh_user, var.ssh_private_key_path]
   depends_on = [aws_instance.monitoring]
 }
