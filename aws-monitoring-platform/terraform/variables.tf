@@ -38,6 +38,12 @@ variable "enable_ssh_health_check" {
   default     = false
 }
 
+variable "enable_grafana_health_check" {
+  description = "When true, run Grafana HTTP health checks as part of Terraform. Disable in CI or when Grafana is not yet reachable from the runner."
+  type        = bool
+  default     = false
+}
+
 variable "allowed_ssh_cidr" {
   description = "Public SSH CIDR block, for example 203.0.113.45/32"
   type        = string

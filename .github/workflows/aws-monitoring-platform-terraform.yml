@@ -56,6 +56,21 @@ jobs:
           else
             echo "Skipping apply: terraform.tfvars not found"
           fi
+      - name: Get public IP
+        run: |
+          echo "PUBLIC_IP=$(terraform output -raw public_ip)" >> $GITHUB_ENV
+      - name: Wait for Grafana
+        run: |
+          for i in $(seq 1 12); do
+            if curl --fail --silent --show-error --max-time 10 http://$PUBLIC_IP:3000/api/health; then
+              echo "Grafana is ready"
+              exit 0
+            fi
+            echo "Grafana not ready yet; sleeping..."
+            sleep 10
+          done
+          echo "Grafana did not become ready within 2 minutes"
+          exit 1
       - name: Wait 5 minutes
         run: sleep 300
       - name: Terraform Destroy

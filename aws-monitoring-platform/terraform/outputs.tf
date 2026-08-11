@@ -20,12 +20,12 @@ output "prometheus_internal_url" {
 
 output "grafana_health_status_code" {
   description = "HTTP status code returned by Grafana /api/health (0 if unreachable)"
-  value       = try(data.http.grafana_health.status_code, 0)
+  value       = var.enable_grafana_health_check ? try(data.http.grafana_health[0].status_code, 0) : 0
 }
 
 output "grafana_health_body" {
   description = "Response body from Grafana /api/health (empty if unreachable)"
-  value       = try(data.http.grafana_health.response_body, "")
+  value       = var.enable_grafana_health_check ? try(data.http.grafana_health[0].response_body, "") : ""
 }
 
 output "grafana_service_status" {
