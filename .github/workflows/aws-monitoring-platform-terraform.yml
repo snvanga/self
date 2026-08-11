@@ -1,12 +1,7 @@
 name: AWS Monitoring Infrastructure
 
 on:
-  workflow_dispatch:
-    inputs:
-      run_destroy:
-        description: "Run terraform destroy after plan"
-        type: boolean
-        default: false
+  workflow_dispatch: {}
   pull_request:
     branches:
       - main
@@ -55,7 +50,6 @@ jobs:
             echo "Skipping plan: terraform.tfvars not found"
           fi
       - name: Terraform Apply
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_destroy == 'true' }}
         run: |
           if [ -f terraform.tfvars ]; then
             terraform apply -var-file=terraform.tfvars -auto-approve
@@ -63,10 +57,8 @@ jobs:
             echo "Skipping apply: terraform.tfvars not found"
           fi
       - name: Wait 5 minutes
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_destroy == 'true' }}
         run: sleep 300
       - name: Terraform Destroy
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_destroy == 'true' }}
         run: |
           if [ -f terraform.tfvars ]; then
             terraform destroy -var-file=terraform.tfvars -auto-approve
