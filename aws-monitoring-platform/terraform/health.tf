@@ -5,7 +5,7 @@
 
 data "http" "grafana_health" {
   count = var.enable_grafana_health_check ? 1 : 0
-  url = "http://${aws_instance.monitoring.public_ip}:3000/api/health"
+  url   = "http://${aws_instance.monitoring.public_ip}:3000/api/health"
   request_headers = {
     Accept = "application/json"
   }
