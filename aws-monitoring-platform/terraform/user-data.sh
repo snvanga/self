@@ -92,9 +92,7 @@ systemctl start node_exporter
 # PROMETHEUS
 # =========================================================
 
-echo "Installing Prometheus..."
-
-PROMETHEUS_VERSION="3.5.0"
+echo "Installing Prometheus..."PROMETHEUS_VERSION="2.45.0"
 
 if ! id prometheus >/dev/null 2>&1; then
 
