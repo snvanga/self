@@ -1,6 +1,15 @@
 ﻿name: AWS Monitoring Infrastructure
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to run'
+        required: false
+        default: 'apply'
+      enable_grafana_health_check:
+        description: 'Enable Grafana HTTP health check after apply'
+        required: false
+        default: 'false'
   pull_request:
     branches:
       - main
@@ -16,7 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TF_VAR_enable_ssh_health_check: 'false'
-      GRAFANA_HEALTH_CHECK_ENABLED: 'false'
+      GRAFANA_HEALTH_CHECK_ENABLED: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.enable_grafana_health_check == 'true' ? 'true' : 'false' }}
+      ACTION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.action != '' ? github.event.inputs.action : 'apply' }}
     defaults:
       run:
         working-directory: aws-monitoring-platform/terraform
@@ -42,25 +52,35 @@ jobs:
           else
             echo "Skipping validate: terraform.tfvars not found"
           fi
-      - name: Terraform Plan
+      - name: Terraform Execute
         run: |
-          if [ -f terraform.tfvars ]; then
-            terraform plan -var-file=terraform.tfvars -input=false
-          else
-            echo "Skipping plan: terraform.tfvars not found"
+          if [ ! -f terraform.tfvars ]; then
+            echo "Skipping ${ACTION}: terraform.tfvars not found"
+            exit 0
           fi
-      - name: Terraform Apply
-        run: |
-          if [ -f terraform.tfvars ]; then
-            terraform apply -var-file=terraform.tfvars -auto-approve
-          else
-            echo "Skipping apply: terraform.tfvars not found"
-          fi
+
+          case "${ACTION}" in
+            plan)
+              terraform plan -var-file=terraform.tfvars -input=false
+              ;;
+            apply)
+              terraform apply -var-file=terraform.tfvars -auto-approve
+              ;;
+            destroy)
+              terraform destroy -var-file=terraform.tfvars -auto-approve
+              ;;
+            *)
+              echo "Unknown ACTION '${ACTION}'. Supported values: plan, apply, destroy"
+              exit 1
+              ;;
+          esac
+
       - name: Get public IP
+        if: env.ACTION == 'apply'
         run: |
           echo "PUBLIC_IP=$(terraform output -raw public_ip)" >> $GITHUB_ENV
       - name: Wait for Grafana
-        if: env.GRAFANA_HEALTH_CHECK_ENABLED == 'true'
+        if: env.ACTION == 'apply' && env.GRAFANA_HEALTH_CHECK_ENABLED == 'true'
         run: |
           for i in $(seq 1 12); do
             if curl --fail --silent --show-error --max-time 10 http://$PUBLIC_IP:3000/api/health; then
