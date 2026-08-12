@@ -142,7 +142,14 @@ cat > /etc/apt/sources.list.d/grafana.list <<EOF
 deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main
 EOF
 apt-get update -y
-apt-get install -y grafana
+apt-cache policy grafana
+apt-get install -y grafana || {
+  echo "Grafana package install command failed"
+  apt-cache policy grafana || true
+  ls -l /etc/apt/sources.list.d/grafana.list || true
+  grep -R "grafana" /var/log/apt 2>/dev/null || true
+  exit 1
+}
 
 if ! dpkg -l grafana >/dev/null 2>&1; then
   echo "Grafana package failed to install"
