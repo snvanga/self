@@ -143,13 +143,21 @@ deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable mai
 EOF
 apt-get update -y
 apt-cache policy grafana
-apt-get install -y grafana || {
-  echo "Grafana package install command failed"
-  apt-cache policy grafana || true
-  ls -l /etc/apt/sources.list.d/grafana.list || true
-  grep -R "grafana" /var/log/apt 2>/dev/null || true
-  exit 1
-}
+
+if ! apt-get install -y grafana; then
+  echo "Grafana apt repo install failed; falling back to direct Grafana .deb package"
+  GRAFANA_VERSION="10.1.4"
+  cd /tmp
+  wget -qO "grafana_${GRAFANA_VERSION}_amd64.deb" "https://dl.grafana.com/oss/release/grafana_${GRAFANA_VERSION}_amd64.deb"
+  apt install -y "./grafana_${GRAFANA_VERSION}_amd64.deb" || {
+    echo "Direct Grafana .deb install failed"
+    ls -l "grafana_${GRAFANA_VERSION}_amd64.deb" || true
+    apt-cache policy grafana || true
+    ls -l /etc/apt/sources.list.d/grafana.list || true
+    grep -R "grafana" /var/log/apt 2>/dev/null || true
+    exit 1
+  }
+fi
 
 if ! dpkg -l grafana >/dev/null 2>&1; then
   echo "Grafana package failed to install"

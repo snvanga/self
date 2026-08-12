@@ -72,12 +72,12 @@ jobs:
           done
           echo "Grafana did not become ready within 2 minutes"
           exit 1
-      # - name: Wait 5 minutes
-      #   run: sleep 300
-      # - name: Terraform Destroy
-      #   run: |
-      #     if [ -f terraform.tfvars ]; then
-      #       terraform destroy -var-file=terraform.tfvars -auto-approve
-      #     else
-      #       echo "Skipping destroy: terraform.tfvars not found"
-      #     fi
+      - name: Wait 5 minutes
+        run: sleep 300
+      - name: Terraform Destroy
+        run: |
+          if [ -f terraform.tfvars ]; then
+            terraform destroy -var-file=terraform.tfvars -auto-approve
+          else
+            echo "Skipping destroy: terraform.tfvars not found"
+          fi
