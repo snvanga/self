@@ -144,14 +144,18 @@ EOF
 apt-get update -y
 apt-cache policy grafana
 
+GRAFANA_VERSION="13.1.3"
+GRAFANA_DEB="grafana_${GRAFANA_VERSION}_amd64.deb"
+GRAFANA_DEB_URL="https://dl.grafana.com/oss/release/${GRAFANA_DEB}"
+
 if ! apt-get install -y grafana; then
   echo "Grafana apt repo install failed; falling back to direct Grafana .deb package"
-  GRAFANA_VERSION="10.1.4"
   cd /tmp
-  wget -qO "grafana_${GRAFANA_VERSION}_amd64.deb" "https://dl.grafana.com/oss/release/grafana_${GRAFANA_VERSION}_amd64.deb"
-  apt install -y "./grafana_${GRAFANA_VERSION}_amd64.deb" || {
+  apt-get install -y adduser libfontconfig1 musl || true
+  wget -qO "${GRAFANA_DEB}" "${GRAFANA_DEB_URL}"
+  apt install -y "./${GRAFANA_DEB}" || {
     echo "Direct Grafana .deb install failed"
-    ls -l "grafana_${GRAFANA_VERSION}_amd64.deb" || true
+    ls -l "${GRAFANA_DEB}" || true
     apt-cache policy grafana || true
     ls -l /etc/apt/sources.list.d/grafana.list || true
     grep -R "grafana" /var/log/apt 2>/dev/null || true
@@ -159,13 +163,22 @@ if ! apt-get install -y grafana; then
   }
 fi
 
-if ! dpkg -l grafana >/dev/null 2>&1; then
+if ! dpkg -l grafana grafana-enterprise >/dev/null 2>&1; then
   echo "Grafana package failed to install"
   apt-cache policy grafana || true
   ls -l /etc/apt/sources.list.d/grafana.list || true
   grep -R "grafana" /var/log/apt 2>/dev/null || true
   exit 1
 fi
+
+echo "Installed Grafana package info:"
+dpkg-query -W -f='${Package} ${Version}\n' grafana grafana-enterprise 2>/dev/null || true
+
+echo "Grafana binary version:"
+grafana-server -v || grafana server -v || true
+
+echo "Grafana CLI version:"
+grafana-cli -v || true
 
 if [ ! -f /lib/systemd/system/grafana-server.service ] && [ ! -f /etc/systemd/system/grafana-server.service ]; then
   echo "Grafana systemd service file not found"
