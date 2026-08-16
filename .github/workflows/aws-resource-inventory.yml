@@ -1,0 +1,424 @@
+      - name: Generate AWS Resource Table
+        shell: bash
+        run: |
+          set +e
+
+          echo ""
+          echo "================================================================================"
+          echo "                         AWS RESOURCE INVENTORY"
+          echo "================================================================================"
+          printf "%-40s %-30s %-20s %-15s\n" \
+            "RESOURCE NAME" "RESOURCE TYPE" "LOCATION" "STATUS"
+
+          echo "--------------------------------------------------------------------------------"
+
+          while read REGION
+          do
+
+            # ============================================================
+            # EC2
+            # ============================================================
+
+            aws ec2 describe-instances \
+              --region "$REGION" \
+              --query 'Reservations[].Instances[].[InstanceId,State.Name]' \
+              --output text 2>/dev/null |
+            while read NAME STATUS
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "EC2 Instance" "$REGION" "$STATUS"
+              fi
+            done
+
+
+            # ============================================================
+            # VPC
+            # ============================================================
+
+            aws ec2 describe-vpcs \
+              --region "$REGION" \
+              --query 'Vpcs[].[VpcId,State]' \
+              --output text 2>/dev/null |
+            while read NAME STATUS
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "VPC" "$REGION" "$STATUS"
+              fi
+            done
+
+
+            # ============================================================
+            # SUBNETS
+            # ============================================================
+
+            aws ec2 describe-subnets \
+              --region "$REGION" \
+              --query 'Subnets[].[SubnetId,State]' \
+              --output text 2>/dev/null |
+            while read NAME STATUS
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "Subnet" "$REGION" "$STATUS"
+              fi
+            done
+
+
+            # ============================================================
+            # SECURITY GROUPS
+            # ============================================================
+
+            aws ec2 describe-security-groups \
+              --region "$REGION" \
+              --query 'SecurityGroups[].[GroupId,GroupName]' \
+              --output text 2>/dev/null |
+            while read ID NAME
+            do
+              if [ -n "$ID" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "Security Group" "$REGION" "ACTIVE"
+              fi
+            done
+
+
+            # ============================================================
+            # NAT GATEWAYS
+            # ============================================================
+
+            aws ec2 describe-nat-gateways \
+              --region "$REGION" \
+              --query 'NatGateways[].[NatGatewayId,State]' \
+              --output text 2>/dev/null |
+            while read NAME STATUS
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "NAT Gateway" "$REGION" "$STATUS"
+              fi
+            done
+
+
+            # ============================================================
+            # LOAD BALANCERS
+            # ============================================================
+
+            aws elbv2 describe-load-balancers \
+              --region "$REGION" \
+              --query 'LoadBalancers[].[LoadBalancerName,State.Code]' \
+              --output text 2>/dev/null |
+            while read NAME STATUS
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "Load Balancer" "$REGION" "$STATUS"
+              fi
+            done
+
+
+            # ============================================================
+            # TARGET GROUPS
+            # ============================================================
+
+            aws elbv2 describe-target-groups \
+              --region "$REGION" \
+              --query 'TargetGroups[].[TargetGroupName]' \
+              --output text 2>/dev/null |
+            while read NAME
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "Target Group" "$REGION" "ACTIVE"
+              fi
+            done
+
+
+            # ============================================================
+            # ECS CLUSTERS
+            # ============================================================
+
+            CLUSTERS=$(aws ecs list-clusters \
+              --region "$REGION" \
+              --query 'clusterArns[]' \
+              --output text 2>/dev/null)
+
+            for CLUSTER in $CLUSTERS
+            do
+
+              CLUSTER_NAME=$(basename "$CLUSTER")
+
+              STATUS=$(aws ecs describe-clusters \
+                --region "$REGION" \
+                --clusters "$CLUSTER" \
+                --query 'clusters[0].status' \
+                --output text 2>/dev/null)
+
+              printf "%-40s %-30s %-20s %-15s\n" \
+                "$CLUSTER_NAME" "ECS Cluster" "$REGION" "$STATUS"
+
+            done
+
+
+            # ============================================================
+            # ECS SERVICES
+            # ============================================================
+
+            for CLUSTER in $CLUSTERS
+            do
+
+              SERVICES=$(aws ecs list-services \
+                --region "$REGION" \
+                --cluster "$CLUSTER" \
+                --query 'serviceArns[]' \
+                --output text 2>/dev/null)
+
+              for SERVICE in $SERVICES
+              do
+
+                SERVICE_NAME=$(basename "$SERVICE")
+
+                STATUS=$(aws ecs describe-services \
+                  --region "$REGION" \
+                  --cluster "$CLUSTER" \
+                  --services "$SERVICE" \
+                  --query 'services[0].status' \
+                  --output text 2>/dev/null)
+
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$SERVICE_NAME" "ECS Service" "$REGION" "$STATUS"
+
+              done
+
+            done
+
+
+            # ============================================================
+            # ECR
+            # ============================================================
+
+            aws ecr describe-repositories \
+              --region "$REGION" \
+              --query 'repositories[].[repositoryName]' \
+              --output text 2>/dev/null |
+            tr '\t' '\n' |
+            while read NAME
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "ECR Repository" "$REGION" "ACTIVE"
+              fi
+            done
+
+
+            # ============================================================
+            # DYNAMODB
+            # ============================================================
+
+            aws dynamodb list-tables \
+              --region "$REGION" \
+              --query 'TableNames[]' \
+              --output text 2>/dev/null |
+            tr '\t' '\n' |
+            while read NAME
+            do
+              if [ -n "$NAME" ]; then
+
+                STATUS=$(aws dynamodb describe-table \
+                  --region "$REGION" \
+                  --table-name "$NAME" \
+                  --query 'Table.TableStatus' \
+                  --output text 2>/dev/null)
+
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "DynamoDB Table" "$REGION" "$STATUS"
+
+              fi
+            done
+
+
+            # ============================================================
+            # LAMBDA
+            # ============================================================
+
+            aws lambda list-functions \
+              --region "$REGION" \
+              --query 'Functions[].[FunctionName]' \
+              --output text 2>/dev/null |
+            tr '\t' '\n' |
+            while read NAME
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "Lambda Function" "$REGION" "ACTIVE"
+              fi
+            done
+
+
+            # ============================================================
+            # CLOUDWATCH LOG GROUPS
+            # ============================================================
+
+            aws logs describe-log-groups \
+              --region "$REGION" \
+              --query 'logGroups[].logGroupName' \
+              --output text 2>/dev/null |
+            tr '\t' '\n' |
+            while read NAME
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "CloudWatch Log Group" "$REGION" "ACTIVE"
+              fi
+            done
+
+
+            # ============================================================
+            # CODEDEPLOY
+            # ============================================================
+
+            aws deploy list-applications \
+              --region "$REGION" \
+              --query 'applications[]' \
+              --output text 2>/dev/null |
+            tr '\t' '\n' |
+            while read NAME
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "CodeDeploy Application" "$REGION" "ACTIVE"
+              fi
+            done
+
+
+            # ============================================================
+            # CODEBUILD
+            # ============================================================
+
+            aws codebuild list-projects \
+              --region "$REGION" \
+              --query 'projects[]' \
+              --output text 2>/dev/null |
+            tr '\t' '\n' |
+            while read NAME
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "CodeBuild Project" "$REGION" "ACTIVE"
+              fi
+            done
+
+
+            # ============================================================
+            # CODEPIPELINE
+            # ============================================================
+
+            aws codepipeline list-pipelines \
+              --region "$REGION" \
+              --query 'pipelines[].name' \
+              --output text 2>/dev/null |
+            tr '\t' '\n' |
+            while read NAME
+            do
+              if [ -n "$NAME" ]; then
+                printf "%-40s %-30s %-20s %-15s\n" \
+                  "$NAME" "CodePipeline" "$REGION" "ACTIVE"
+              fi
+            done
+
+          done < aws-inventory/regions.txt
+
+
+          # ============================================================
+          # S3 - GLOBAL
+          # ============================================================
+
+          echo ""
+          echo "================================================================================"
+          echo "S3 BUCKETS"
+          echo "================================================================================"
+
+          printf "%-40s %-30s %-20s %-15s\n" \
+            "RESOURCE NAME" "RESOURCE TYPE" "LOCATION" "STATUS"
+
+          echo "--------------------------------------------------------------------------------"
+
+          aws s3api list-buckets \
+            --query 'Buckets[].Name' \
+            --output text 2>/dev/null |
+          tr '\t' '\n' |
+          while read NAME
+          do
+            if [ -n "$NAME" ]; then
+
+              LOCATION=$(aws s3api get-bucket-location \
+                --bucket "$NAME" \
+                --query 'LocationConstraint' \
+                --output text 2>/dev/null)
+
+              if [ "$LOCATION" = "None" ] || [ -z "$LOCATION" ]; then
+                LOCATION="us-east-1"
+              fi
+
+              printf "%-40s %-30s %-20s %-15s\n" \
+                "$NAME" "S3 Bucket" "$LOCATION" "ACTIVE"
+
+            fi
+          done
+
+
+          # ============================================================
+          # IAM - GLOBAL
+          # ============================================================
+
+          echo ""
+          echo "================================================================================"
+          echo "IAM RESOURCES"
+          echo "================================================================================"
+
+          printf "%-40s %-30s %-20s %-15s\n" \
+            "RESOURCE NAME" "RESOURCE TYPE" "LOCATION" "STATUS"
+
+          echo "--------------------------------------------------------------------------------"
+
+          aws iam list-roles \
+            --query 'Roles[].RoleName' \
+            --output text 2>/dev/null |
+          tr '\t' '\n' |
+          while read NAME
+          do
+            if [ -n "$NAME" ]; then
+              printf "%-40s %-30s %-20s %-15s\n" \
+                "$NAME" "IAM Role" "Global" "ACTIVE"
+            fi
+          done
+
+          aws iam list-users \
+            --query 'Users[].UserName' \
+            --output text 2>/dev/null |
+          tr '\t' '\n' |
+          while read NAME
+          do
+            if [ -n "$NAME" ]; then
+              printf "%-40s %-30s %-20s %-15s\n" \
+                "$NAME" "IAM User" "Global" "ACTIVE"
+            fi
+          done
+
+          aws iam list-groups \
+            --query 'Groups[].GroupName' \
+            --output text 2>/dev/null |
+          tr '\t' '\n' |
+          while read NAME
+          do
+            if [ -n "$NAME" ]; then
+              printf "%-40s %-30s %-20s %-15s\n" \
+                "$NAME" "IAM Group" "Global" "ACTIVE"
+            fi
+          done
+
+
+          echo ""
+          echo "================================================================================"
+          echo "                         INVENTORY COMPLETED"
+          echo "================================================================================"
