@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TF_VAR_enable_ssh_health_check: 'false'
-      GRAFANA_HEALTH_CHECK_ENABLED: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.enable_grafana_health_check == 'true' ? 'true' : 'false' }}
-      ACTION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.action != '' ? github.event.inputs.action : 'apply' }}
+      GRAFANA_HEALTH_CHECK_ENABLED: "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.enable_grafana_health_check == 'true' && 'true' || 'false' }}"
+      ACTION: "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.action != '' && github.event.inputs.action || 'apply' }}"
     defaults:
       run:
         working-directory: aws-monitoring-platform/terraform
