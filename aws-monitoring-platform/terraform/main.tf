@@ -32,9 +32,10 @@ resource "aws_security_group" "monitoring" {
 }
 
 resource "aws_instance" "monitoring" {
-  ami           = var.ami_id
-  instance_type = var.instance_type
-  key_name      = var.key_name
+  ami                         = var.ami_id
+  instance_type               = var.instance_type
+  key_name                    = var.key_name
+  associate_public_ip_address = true
 
   vpc_security_group_ids = [aws_security_group.monitoring.id]
 
