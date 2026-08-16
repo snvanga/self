@@ -68,6 +68,7 @@ jobs:
         run: terraform plan
 
       - name: Terraform Apply
+        working-directory: ./amazon-ecs-fullstack-app-terraform-main/Infrastructure
         run: terraform apply -auto-approve
 
 
