@@ -56,12 +56,15 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Init
+        working-directory: ./amazon-ecs-fullstack-app-terraform-main/Infrastructure
         run: terraform init
 
       - name: Terraform Validate
+        working-directory: ./amazon-ecs-fullstack-app-terraform-main/Infrastructure
         run: terraform validate
 
       - name: Terraform Plan
+        working-directory: ./amazon-ecs-fullstack-app-terraform-main/Infrastructure
         run: terraform plan
 
       - name: Terraform Apply
