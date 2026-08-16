@@ -17,6 +17,7 @@ env:
   # ==========================================================
 
   TF_VAR_aws_region: ${{ secrets.AWS_DEFAULT_REGION }}
+  TF_VAR_environment_name: ecs-fullstack
 
   # ==========================================================
   # ECR
@@ -32,7 +33,6 @@ env:
   # ==========================================================
 
   ECS_CLUSTER: ecs-fullstack
-
   ECS_FRONTEND_SERVICE: ecs-fullstack-client
   ECS_BACKEND_SERVICE: ecs-fullstack-server
 

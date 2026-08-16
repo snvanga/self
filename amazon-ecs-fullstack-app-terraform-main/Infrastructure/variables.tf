@@ -19,13 +19,12 @@ variable "aws_region" {
 
 variable "environment_name" {
   description = "Name of the environment"
-
-  type = string
+  type        = string
+  default = "ecs-fullstack"
 
   validation {
-    condition = length(var.environment_name) < 23
-
-    error_message = "environment_name must be less than 23 characters."
+    condition     = length(var.environment_name) > 0 && length(var.environment_name) < 23
+    error_message = "environment_name must not be empty and must be less than 23 characters."
   }
 }
 
