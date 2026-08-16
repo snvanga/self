@@ -1,6 +1,6 @@
 resource "aws_security_group" "monitoring" {
-  name        = "monitoring-server-sg"
-  description = "Security group for Prometheus and Grafana"
+  name        = "grafana-server-sg"
+  description = "Security group for Grafana"
 
   ingress {
     description = "SSH"
@@ -27,20 +27,16 @@ resource "aws_security_group" "monitoring" {
   }
 
   tags = {
-    Name = "monitoring-server-sg"
+    Name = "grafana-server-sg"
   }
 }
 
-
 resource "aws_instance" "monitoring" {
-
   ami           = var.ami_id
   instance_type = var.instance_type
   key_name      = var.key_name
 
-  vpc_security_group_ids = [
-    aws_security_group.monitoring.id
-  ]
+  vpc_security_group_ids = [aws_security_group.monitoring.id]
 
   user_data = file("${path.module}/user-data.sh")
 
@@ -50,8 +46,8 @@ resource "aws_instance" "monitoring" {
   }
 
   tags = {
-    Name        = "prometheus-grafana-server"
+    Name        = "grafana-server"
     Environment = "dev"
-    Project     = "monitoring"
+    Project     = "grafana"
   }
 }
