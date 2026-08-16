@@ -1,181 +1,164 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: MIT-0
-
-/*===========================================
-      AWS IAM for different resources
-============================================*/
-
-# ------- IAM Roles -------
 resource "aws_iam_role" "ecs_task_excecution_role" {
-  count              = var.create_ecs_role == true ? 1 : 0
-  name               = var.name
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "ecs-tasks.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
+  count = var.create_ecs_role ? 1 : 0
+
+  name = var.name
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
   tags = {
     Name = var.name
-  }
-
-  lifecycle {
-    create_before_destroy = true
   }
 }
 
 resource "aws_iam_role" "ecs_task_role" {
-  count              = var.create_ecs_role == true ? 1 : 0
-  name               = var.name_ecs_task_role
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "ecs-tasks.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
+  count = var.create_ecs_role ? 1 : 0
+
+  name = var.name_ecs_task_role
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
   tags = {
     Name = var.name_ecs_task_role
   }
-
-  lifecycle {
-    create_before_destroy = true
-  }
 }
-
 
 resource "aws_iam_role" "devops_role" {
-  count              = var.create_devops_role == true ? 1 : 0
-  name               = var.name
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": [
-          "codebuild.amazonaws.com",
-          "codedeploy.amazonaws.com",
-          "codepipeline.amazonaws.com"
-        ]
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
+  count = var.create_devops_role ? 1 : 0
+
+  name = var.name
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Principal = {
+          Service = [
+            "codebuild.amazonaws.com",
+            "codedeploy.amazonaws.com",
+            "codepipeline.amazonaws.com"
+          ]
+        }
+
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
   tags = {
     Name = var.name
-  }
-  lifecycle {
-    create_before_destroy = true
   }
 }
 
 resource "aws_iam_role" "codedeploy_role" {
-  count              = var.create_codedeploy_role == true ? 1 : 0
-  name               = var.name
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "codedeploy.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
+  count = var.create_codedeploy_role ? 1 : 0
 
+  name = var.name
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Principal = {
+          Service = "codedeploy.amazonaws.com"
+        }
+
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Name = var.name
+  }
 }
 
-# ------- IAM Policies -------
 resource "aws_iam_policy" "policy_for_role" {
-  count       = var.create_devops_policy == true ? 1 : 0
+  count = var.create_devops_policy ? 1 : 0
+
   name        = "Policy-${var.name}"
   description = "IAM Policy for Role ${var.name}"
-  policy      = data.aws_iam_policy_document.role_policy_devops_role.json
 
-  lifecycle {
-    create_before_destroy = true
-  }
+  policy = data.aws_iam_policy_document.role_policy_devops_role.json
 }
 
 resource "aws_iam_policy" "policy_for_ecs_task_role" {
-  count       = var.create_ecs_role == true ? 1 : 0
+  count = var.create_ecs_role ? 1 : 0
+
   name        = "Policy-${var.name_ecs_task_role}"
   description = "IAM Policy for Role ${var.name_ecs_task_role}"
-  policy      = data.aws_iam_policy_document.role_policy_ecs_task_role.json
 
-  lifecycle {
-    create_before_destroy = true
-  }
+  policy = data.aws_iam_policy_document.role_policy_ecs_task_role.json
 }
 
-# ------- IAM Policies Attachments -------
 resource "aws_iam_role_policy_attachment" "ecs_attachment" {
-  count      = var.create_ecs_role == true ? 1 : 0
-  policy_arn = aws_iam_policy.policy_for_ecs_task_role[0].arn
-  role       = aws_iam_role.ecs_task_role[0].name
+  count = var.create_ecs_role ? 1 : 0
 
-  lifecycle {
-    create_before_destroy = true
-  }
+  role       = aws_iam_role.ecs_task_role[0].name
+  policy_arn = aws_iam_policy.policy_for_ecs_task_role[0].arn
 }
 
 resource "aws_iam_role_policy_attachment" "attachment" {
-  count      = length(aws_iam_role.ecs_task_excecution_role) > 0 ? 1 : 0
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-  role       = aws_iam_role.ecs_task_excecution_role[0].name
+  count = var.create_ecs_role ? 1 : 0
 
-  lifecycle {
-    create_before_destroy = true
-  }
+  role = aws_iam_role.ecs_task_excecution_role[0].name
+
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
 resource "aws_iam_role_policy_attachment" "attachment2" {
-  count      = var.create_devops_policy == true ? 1 : 0
-  policy_arn = aws_iam_policy.policy_for_role[0].arn
-  role       = var.attach_to
+  count = var.create_devops_policy ? 1 : 0
 
-  lifecycle {
-    create_before_destroy = true
-  }
+  role       = var.attach_to
+  policy_arn = aws_iam_policy.policy_for_role[0].arn
 }
 
 resource "aws_iam_role_policy_attachment" "codedeploy_attachment" {
-  count      = var.create_codedeploy_role == true ? 1 : 0
+  count = var.create_codedeploy_role ? 1 : 0
+
+  role = aws_iam_role.codedeploy_role[0].name
+
   policy_arn = "arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS"
-  role       = aws_iam_role.codedeploy_role[0].name
 }
 
-# ------- IAM Policy Documents -------
 data "aws_iam_policy_document" "role_policy_devops_role" {
   statement {
     sid    = "AllowS3Actions"
     effect = "Allow"
+
     actions = [
       "s3:PutObject",
       "s3:GetObject",
@@ -183,11 +166,14 @@ data "aws_iam_policy_document" "role_policy_devops_role" {
       "s3:GetBucketAcl",
       "s3:List*"
     ]
+
     resources = ["*"]
   }
+
   statement {
     sid    = "AllowCodebuildActions"
     effect = "Allow"
+
     actions = [
       "codebuild:BatchGetBuilds",
       "codebuild:StartBuild",
@@ -195,19 +181,25 @@ data "aws_iam_policy_document" "role_policy_devops_role" {
       "codebuild:StartBuildBatch",
       "codebuild:StopBuild"
     ]
+
     resources = var.code_build_projects
   }
+
   statement {
     sid    = "AllowCodebuildList"
     effect = "Allow"
+
     actions = [
       "codebuild:ListBuilds"
     ]
+
     resources = ["*"]
   }
+
   statement {
     sid    = "AllowCodeDeployActions"
     effect = "Allow"
+
     actions = [
       "codedeploy:CreateDeployment",
       "codedeploy:GetApplication",
@@ -216,11 +208,14 @@ data "aws_iam_policy_document" "role_policy_devops_role" {
       "codedeploy:GetDeploymentGroup",
       "codedeploy:RegisterApplicationRevision"
     ]
+
     resources = var.code_deploy_resources
   }
+
   statement {
     sid    = "AllowCodeDeployConfigs"
     effect = "Allow"
+
     actions = [
       "codedeploy:GetDeploymentConfig",
       "codedeploy:CreateDeploymentConfig",
@@ -231,13 +226,15 @@ data "aws_iam_policy_document" "role_policy_devops_role" {
       "codedeploy:ListDeploymentConfigs",
       "codedeploy:ListDeploymentGroups",
       "codedeploy:ListDeployments"
-
     ]
+
     resources = ["*"]
   }
+
   statement {
     sid    = "AllowECRActions"
     effect = "Allow"
+
     actions = [
       "ecr:BatchCheckLayerAvailability",
       "ecr:CompleteLayerUpload",
@@ -247,19 +244,25 @@ data "aws_iam_policy_document" "role_policy_devops_role" {
       "ecr:PutImage",
       "ecr:UploadLayerPart"
     ]
+
     resources = var.ecr_repositories
   }
+
   statement {
     sid    = "AllowECRAuthorization"
     effect = "Allow"
+
     actions = [
-      "ecr:GetAuthorizationToken",
+      "ecr:GetAuthorizationToken"
     ]
+
     resources = ["*"]
   }
+
   statement {
-    sid    = "AllowCECSServiceActions"
+    sid    = "AllowECSServiceActions"
     effect = "Allow"
+
     actions = [
       "ecs:ListServices",
       "ecs:ListTasks",
@@ -281,24 +284,31 @@ data "aws_iam_policy_document" "role_policy_devops_role" {
       "ecs:UpdateCluster",
       "ecs:UpdateTaskSet"
     ]
+
     resources = ["*"]
   }
+
   statement {
     sid    = "AllowIAMPassRole"
     effect = "Allow"
+
     actions = [
       "iam:PassRole"
     ]
+
     resources = ["*"]
   }
+
   statement {
     sid    = "AllowCloudWatchActions"
     effect = "Allow"
+
     actions = [
       "logs:CreateLogGroup",
       "logs:CreateLogStream",
       "logs:PutLogEvents"
     ]
+
     resources = ["*"]
   }
 }
@@ -307,31 +317,39 @@ data "aws_iam_policy_document" "role_policy_ecs_task_role" {
   statement {
     sid    = "AllowS3Actions"
     effect = "Allow"
+
     actions = [
       "s3:GetObject",
       "s3:ListBucket"
     ]
+
     resources = var.s3_bucket_assets
   }
+
   statement {
     sid    = "AllowIAMPassRole"
     effect = "Allow"
+
     actions = [
       "iam:PassRole"
     ]
+
     resources = ["*"]
   }
+
   statement {
     sid    = "AllowDynamodbActions"
     effect = "Allow"
+
     actions = [
       "dynamodb:BatchGetItem",
       "dynamodb:Describe*",
       "dynamodb:List*",
       "dynamodb:GetItem",
       "dynamodb:Query",
-      "dynamodb:Scan",
+      "dynamodb:Scan"
     ]
+
     resources = var.dynamodb_table
   }
 }
