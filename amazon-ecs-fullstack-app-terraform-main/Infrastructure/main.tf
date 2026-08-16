@@ -5,17 +5,22 @@
           Root file
 ============================*/
 
+
 # ============================================================
 # AWS PROVIDER
 # ============================================================
 
-# GitHub Actions provides AWS credentials through:
+# AWS credentials are provided by GitHub Actions:
 #
 # AWS_ACCESS_KEY_ID
 # AWS_SECRET_ACCESS_KEY
 # AWS_DEFAULT_REGION
 #
-# Therefore, do NOT configure an AWS profile here.
+# Terraform receives the region through:
+#
+# TF_VAR_aws_region
+#
+# Therefore, no AWS profile is required here.
 
 provider "aws" {
   region = var.aws_region
@@ -32,7 +37,7 @@ resource "random_id" "RANDOM_ID" {
 
 
 # ============================================================
-# AWS ACCOUNT
+# AWS ACCOUNT ID
 # ============================================================
 
 data "aws_caller_identity" "id_current_account" {}
@@ -54,7 +59,7 @@ module "networking" {
 
 
 # ============================================================
-# SERVER ALB TARGET GROUP - BLUE
+# SERVER TARGET GROUP - BLUE
 # ============================================================
 
 module "target_group_server_blue" {
@@ -75,7 +80,7 @@ module "target_group_server_blue" {
 
 
 # ============================================================
-# SERVER ALB TARGET GROUP - GREEN
+# SERVER TARGET GROUP - GREEN
 # ============================================================
 
 module "target_group_server_green" {
@@ -96,7 +101,7 @@ module "target_group_server_green" {
 
 
 # ============================================================
-# CLIENT ALB TARGET GROUP - BLUE
+# CLIENT TARGET GROUP - BLUE
 # ============================================================
 
 module "target_group_client_blue" {
@@ -117,7 +122,7 @@ module "target_group_client_blue" {
 
 
 # ============================================================
-# CLIENT ALB TARGET GROUP - GREEN
+# CLIENT TARGET GROUP - GREEN
 # ============================================================
 
 module "target_group_client_green" {
@@ -195,7 +200,6 @@ module "alb_server" {
 
   security_group = module.security_group_alb_server.sg_id
 
-  # Initial traffic goes to BLUE.
   target_group = module.target_group_server_blue.arn_tg
 }
 
@@ -218,7 +222,6 @@ module "alb_client" {
 
   security_group = module.security_group_alb_client.sg_id
 
-  # Initial traffic goes to BLUE.
   target_group = module.target_group_client_blue.arn_tg
 }
 
@@ -403,7 +406,6 @@ module "ecs_service_server" {
 
   ecs_cluster_id = module.ecs_cluster.ecs_cluster_id
 
-  # Initial service target group = BLUE
   arn_target_group = module.target_group_server_blue.arn_tg
 
   arn_task_definition = module.ecs_taks_definition_server.arn_task_definition
@@ -438,7 +440,6 @@ module "ecs_service_client" {
 
   ecs_cluster_id = module.ecs_cluster.ecs_cluster_id
 
-  # Initial service target group = BLUE
   arn_target_group = module.target_group_client_blue.arn_tg
 
   arn_task_definition = module.ecs_taks_definition_client.arn_task_definition
@@ -498,13 +499,6 @@ module "ecs_autoscaling_client" {
 
 # ============================================================
 # CODEDEPLOY IAM ROLE
-#
-# CodeDeploy is retained because we are using
-# ECS BLUE/GREEN deployment.
-#
-# GitHub Actions replaces CodePipeline/CodeBuild,
-# but CodeDeploy performs the ECS blue/green traffic
-# shifting.
 # ============================================================
 
 module "codedeploy_role" {
@@ -518,8 +512,6 @@ module "codedeploy_role" {
 
 # ============================================================
 # SNS TOPIC
-#
-# Used by the existing CodeDeploy module.
 # ============================================================
 
 module "sns" {
@@ -530,9 +522,7 @@ module "sns" {
 
 
 # ============================================================
-# SERVER CODEDEPLOY APPLICATION
-#
-# ECS BLUE/GREEN DEPLOYMENT
+# SERVER CODEDEPLOY
 # ============================================================
 
 module "codedeploy_server" {
@@ -557,9 +547,7 @@ module "codedeploy_server" {
 
 
 # ============================================================
-# CLIENT CODEDEPLOY APPLICATION
-#
-# ECS BLUE/GREEN DEPLOYMENT
+# CLIENT CODEDEPLOY
 # ============================================================
 
 module "codedeploy_client" {
