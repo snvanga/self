@@ -22,10 +22,17 @@ env:
   ECS_FRONTEND_SERVICE: ecs-fullstack-client
   ECS_BACKEND_SERVICE: ecs-fullstack-server
 
+  TF_IN_AUTOMATION: true
+
+
 jobs:
 
+  # ==========================================================
+  # TERRAFORM APPLY
+  # ==========================================================
+
   terraform:
-    name: Terraform Infrastructure
+    name: Terraform Apply
     runs-on: ubuntu-latest
 
     defaults:
@@ -52,33 +59,32 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Version
-        run: |
-          terraform version
+        run: terraform version
 
       - name: Terraform Init
-        run: |
-          terraform init
+        run: terraform init
 
       - name: Terraform Format
-        run: |
-          terraform fmt -check -recursive
+        run: terraform fmt -check -recursive
 
       - name: Terraform Validate
-        run: |
-          terraform validate
+        run: terraform validate
 
       - name: Terraform Plan
-        run: |
-          terraform plan
+        run: terraform plan
 
       - name: Terraform Apply
-        run: |
-          terraform apply -auto-approve
+        run: terraform apply -auto-approve
 
+
+  # ==========================================================
+  # FRONTEND
+  # ==========================================================
 
   frontend:
     name: Build Frontend
     runs-on: ubuntu-latest
+
     needs: terraform
 
     steps:
@@ -121,9 +127,14 @@ jobs:
           path: frontend-image.txt
 
 
+  # ==========================================================
+  # BACKEND
+  # ==========================================================
+
   backend:
     name: Build Backend
     runs-on: ubuntu-latest
+
     needs: terraform
 
     steps:
@@ -165,6 +176,10 @@ jobs:
           name: backend-image
           path: backend-image.txt
 
+
+  # ==========================================================
+  # DEPLOY
+  # ==========================================================
 
   deploy:
     name: Deploy to ECS
@@ -214,6 +229,10 @@ jobs:
         run: |
           echo "image=$(cat backend-image.txt)" >> "$GITHUB_OUTPUT"
 
+      # --------------------------------------------------------
+      # FRONTEND
+      # --------------------------------------------------------
+
       - name: Get Frontend Task Definition
         run: |
           aws ecs describe-task-definition \
@@ -236,6 +255,10 @@ jobs:
           service: ${{ env.ECS_FRONTEND_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
+
+      # --------------------------------------------------------
+      # BACKEND
+      # --------------------------------------------------------
 
       - name: Get Backend Task Definition
         run: |
@@ -261,6 +284,10 @@ jobs:
           wait-for-service-stability: true
 
 
+  # ==========================================================
+  # WAIT 2 MINUTES
+  # ==========================================================
+
   wait:
     name: Wait 2 Minutes
     runs-on: ubuntu-latest
@@ -271,17 +298,26 @@ jobs:
 
       - name: Wait for testing
         run: |
-          echo "ECS deployment completed."
-          echo "Infrastructure will remain available for 2 minutes."
+          echo "Deployment completed successfully."
+          echo "Environment will remain available for 2 minutes."
           sleep 120
           echo "2 minutes completed."
 
 
+  # ==========================================================
+  # DESTROY
+  # ==========================================================
+
   destroy:
-    name: Destroy Infrastructure
+    name: Terraform Destroy
     runs-on: ubuntu-latest
 
-    needs: wait
+    needs:
+      - terraform
+      - frontend
+      - backend
+      - deploy
+      - wait
 
     if: ${{ always() }}
 
@@ -305,8 +341,12 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Init
+        run: terraform init
+
+      - name: Check Terraform State
         run: |
-          terraform init
+          echo "Terraform resources currently tracked:"
+          terraform state list || true
 
       - name: Terraform Destroy
         run: |
