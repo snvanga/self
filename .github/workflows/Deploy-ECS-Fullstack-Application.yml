@@ -1,10 +1,11 @@
 name: Deploy ECS Fullstack Application
 
 on:
-  push:
-    branches:
-      - main
-      - snv-test
+  workflow_run:
+    workflows:
+      - "AWS Cleanup"
+    types:
+      - completed
 
   workflow_dispatch:
 
@@ -24,8 +25,27 @@ env:
 
   TF_IN_AUTOMATION: true
 
-
 jobs:
+
+  # ==========================================================
+  # CHECK CLEANUP STATUS
+  # ==========================================================
+
+  cleanup-check:
+    name: Verify Cleanup Completed
+    runs-on: ubuntu-latest
+
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+
+      - name: Cleanup completed successfully
+        run: |
+          echo "Previous cleanup workflow completed successfully."
+          echo "Starting ECS infrastructure deployment."
+
 
   # ==========================================================
   # TERRAFORM APPLY
@@ -34,6 +54,8 @@ jobs:
   terraform:
     name: Terraform Apply
     runs-on: ubuntu-latest
+
+    needs: cleanup-check
 
     defaults:
       run:
@@ -313,6 +335,7 @@ jobs:
     runs-on: ubuntu-latest
 
     needs:
+      - cleanup-check
       - terraform
       - frontend
       - backend
@@ -345,9 +368,20 @@ jobs:
 
       - name: Check Terraform State
         run: |
-          echo "Terraform resources currently tracked:"
+          echo "=========================================="
+          echo "Terraform resources currently tracked"
+          echo "=========================================="
+
           terraform state list || true
 
       - name: Terraform Destroy
         run: |
+          echo "=========================================="
+          echo "DESTROYING TERRAFORM INFRASTRUCTURE"
+          echo "=========================================="
+
           terraform destroy -auto-approve
+
+          echo "=========================================="
+          echo "TERRAFORM DESTROY COMPLETED"
+          echo "=========================================="

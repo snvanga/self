@@ -10,18 +10,6 @@
 # AWS PROVIDER
 # ============================================================
 
-# AWS credentials are provided by GitHub Actions:
-#
-# AWS_ACCESS_KEY_ID
-# AWS_SECRET_ACCESS_KEY
-# AWS_DEFAULT_REGION
-#
-# Terraform receives the region through:
-#
-# TF_VAR_aws_region
-#
-# Therefore, no AWS profile is required here.
-
 provider "aws" {
   region = var.aws_region
 }
@@ -66,8 +54,10 @@ module "target_group_server_blue" {
   source = "./Modules/ALB"
 
   create_target_group = true
+  create_alb          = false
 
-  name     = "tg-${var.environment_name}-s-b"
+  name = "tg-${var.environment_name}-s-b"
+
   port     = 80
   protocol = "HTTP"
 
@@ -76,6 +66,10 @@ module "target_group_server_blue" {
 
   health_check_path = "/status"
   health_check_port = var.port_app_server
+
+  depends_on = [
+    module.networking
+  ]
 }
 
 
@@ -87,8 +81,10 @@ module "target_group_server_green" {
   source = "./Modules/ALB"
 
   create_target_group = true
+  create_alb          = false
 
-  name     = "tg-${var.environment_name}-s-g"
+  name = "tg-${var.environment_name}-s-g"
+
   port     = 80
   protocol = "HTTP"
 
@@ -97,6 +93,10 @@ module "target_group_server_green" {
 
   health_check_path = "/status"
   health_check_port = var.port_app_server
+
+  depends_on = [
+    module.networking
+  ]
 }
 
 
@@ -108,8 +108,10 @@ module "target_group_client_blue" {
   source = "./Modules/ALB"
 
   create_target_group = true
+  create_alb          = false
 
-  name     = "tg-${var.environment_name}-c-b"
+  name = "tg-${var.environment_name}-c-b"
+
   port     = 80
   protocol = "HTTP"
 
@@ -118,6 +120,10 @@ module "target_group_client_blue" {
 
   health_check_path = "/"
   health_check_port = var.port_app_client
+
+  depends_on = [
+    module.networking
+  ]
 }
 
 
@@ -129,8 +135,10 @@ module "target_group_client_green" {
   source = "./Modules/ALB"
 
   create_target_group = true
+  create_alb          = false
 
-  name     = "tg-${var.environment_name}-c-g"
+  name = "tg-${var.environment_name}-c-g"
+
   port     = 80
   protocol = "HTTP"
 
@@ -139,6 +147,10 @@ module "target_group_client_green" {
 
   health_check_path = "/"
   health_check_port = var.port_app_client
+
+  depends_on = [
+    module.networking
+  ]
 }
 
 
@@ -159,6 +171,10 @@ module "security_group_alb_server" {
   ]
 
   ingress_port = 80
+
+  depends_on = [
+    module.networking
+  ]
 }
 
 
@@ -179,17 +195,22 @@ module "security_group_alb_client" {
   ]
 
   ingress_port = 80
+
+  depends_on = [
+    module.networking
+  ]
 }
 
 
 # ============================================================
 # SERVER APPLICATION ALB
-# ============================================================
+# ==============================================================
 
 module "alb_server" {
   source = "./Modules/ALB"
 
-  create_alb = true
+  create_alb          = true
+  create_target_group = false
 
   name = "${var.environment_name}-ser"
 
@@ -201,6 +222,11 @@ module "alb_server" {
   security_group = module.security_group_alb_server.sg_id
 
   target_group = module.target_group_server_blue.arn_tg
+
+  depends_on = [
+    module.target_group_server_blue,
+    module.security_group_alb_server
+  ]
 }
 
 
@@ -211,7 +237,8 @@ module "alb_server" {
 module "alb_client" {
   source = "./Modules/ALB"
 
-  create_alb = true
+  create_alb          = true
+  create_target_group = false
 
   name = "${var.environment_name}-cli"
 
@@ -223,6 +250,11 @@ module "alb_client" {
   security_group = module.security_group_alb_client.sg_id
 
   target_group = module.target_group_client_blue.arn_tg
+
+  depends_on = [
+    module.target_group_client_blue,
+    module.security_group_alb_client
+  ]
 }
 
 
@@ -242,6 +274,10 @@ module "ecs_role" {
   dynamodb_table = [
     module.dynamodb_table.dynamodb_table_arn
   ]
+
+  depends_on = [
+    module.dynamodb_table
+  ]
 }
 
 
@@ -257,11 +293,15 @@ module "ecs_role_policy" {
   create_policy = true
 
   attach_to = module.ecs_role.name_role
+
+  depends_on = [
+    module.ecs_role
+  ]
 }
 
 
 # ============================================================
-# SERVER ECR REPOSITORY
+# SERVER ECR
 # ============================================================
 
 module "ecr_server" {
@@ -272,7 +312,7 @@ module "ecr_server" {
 
 
 # ============================================================
-# CLIENT ECR REPOSITORY
+# CLIENT ECR
 # ============================================================
 
 module "ecr_client" {
@@ -305,6 +345,11 @@ module "ecs_taks_definition_server" {
   region = var.aws_region
 
   container_port = var.port_app_server
+
+  depends_on = [
+    module.ecs_role,
+    module.ecr_server
+  ]
 }
 
 
@@ -331,6 +376,11 @@ module "ecs_taks_definition_client" {
   region = var.aws_region
 
   container_port = var.port_app_client
+
+  depends_on = [
+    module.ecs_role,
+    module.ecr_client
+  ]
 }
 
 
@@ -351,6 +401,10 @@ module "security_group_ecs_task_server" {
 
   security_groups = [
     module.security_group_alb_server.sg_id
+  ]
+
+  depends_on = [
+    module.security_group_alb_server
   ]
 }
 
@@ -373,6 +427,10 @@ module "security_group_ecs_task_client" {
   security_groups = [
     module.security_group_alb_client.sg_id
   ]
+
+  depends_on = [
+    module.security_group_alb_client
+  ]
 }
 
 
@@ -392,10 +450,6 @@ module "ecs_cluster" {
 # ============================================================
 
 module "ecs_service_server" {
-  depends_on = [
-    module.alb_server
-  ]
-
   source = "./Modules/ECS/Service"
 
   name = "${var.environment_name}-server"
@@ -418,6 +472,12 @@ module "ecs_service_server" {
   container_port = var.port_app_server
 
   container_name = var.container_name["server"]
+
+  depends_on = [
+    module.alb_server,
+    module.target_group_server_blue,
+    module.ecs_taks_definition_server
+  ]
 }
 
 
@@ -426,10 +486,6 @@ module "ecs_service_server" {
 # ============================================================
 
 module "ecs_service_client" {
-  depends_on = [
-    module.alb_client
-  ]
-
   source = "./Modules/ECS/Service"
 
   name = "${var.environment_name}-client"
@@ -452,6 +508,12 @@ module "ecs_service_client" {
   container_port = var.port_app_client
 
   container_name = var.container_name["client"]
+
+  depends_on = [
+    module.alb_client,
+    module.target_group_client_blue,
+    module.ecs_taks_definition_client
+  ]
 }
 
 
@@ -460,10 +522,6 @@ module "ecs_service_client" {
 # ============================================================
 
 module "ecs_autoscaling_server" {
-  depends_on = [
-    module.ecs_service_server
-  ]
-
   source = "./Modules/ECS/Autoscaling"
 
   name = "${var.environment_name}-server"
@@ -473,6 +531,10 @@ module "ecs_autoscaling_server" {
   min_capacity = 1
 
   max_capacity = 4
+
+  depends_on = [
+    module.ecs_service_server
+  ]
 }
 
 
@@ -481,10 +543,6 @@ module "ecs_autoscaling_server" {
 # ============================================================
 
 module "ecs_autoscaling_client" {
-  depends_on = [
-    module.ecs_service_client
-  ]
-
   source = "./Modules/ECS/Autoscaling"
 
   name = "${var.environment_name}-client"
@@ -494,6 +552,10 @@ module "ecs_autoscaling_client" {
   min_capacity = 1
 
   max_capacity = 4
+
+  depends_on = [
+    module.ecs_service_client
+  ]
 }
 
 
@@ -511,7 +573,7 @@ module "codedeploy_role" {
 
 
 # ============================================================
-# SNS TOPIC
+# SNS
 # ============================================================
 
 module "sns" {
@@ -543,6 +605,12 @@ module "codedeploy_server" {
   sns_topic_arn = module.sns.sns_arn
 
   codedeploy_role = module.codedeploy_role.arn_role_codedeploy
+
+  depends_on = [
+    module.ecs_service_server,
+    module.target_group_server_green,
+    module.alb_server
+  ]
 }
 
 
@@ -568,11 +636,17 @@ module "codedeploy_client" {
   sns_topic_arn = module.sns.sns_arn
 
   codedeploy_role = module.codedeploy_role.arn_role_codedeploy
+
+  depends_on = [
+    module.ecs_service_client,
+    module.target_group_client_green,
+    module.alb_client
+  ]
 }
 
 
 # ============================================================
-# S3 BUCKET FOR BACKEND ASSETS
+# S3 BUCKET
 # ============================================================
 
 module "s3_assets" {
@@ -583,7 +657,7 @@ module "s3_assets" {
 
 
 # ============================================================
-# DYNAMODB TABLE
+# DYNAMODB
 # ============================================================
 
 module "dynamodb_table" {

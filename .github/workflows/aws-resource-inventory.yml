@@ -1,142 +1,575 @@
+name: AWS Resource Inventory
+
+on:
+  push:
+    branches:
+      - main
+      - snv-test
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+
+jobs:
+
+  aws-resource-inventory:
+
+    name: AWS Resource Inventory
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ============================================================
+      # CHECKOUT REPOSITORY
+      # ============================================================
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+
+      # ============================================================
+      # CONFIGURE AWS CREDENTIALS
+      # ============================================================
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+
+      # ============================================================
+      # VERIFY AWS CONNECTION
+      # ============================================================
+
+      - name: Verify AWS Identity
+        shell: bash
+        run: |
+          echo "=============================================="
+          echo "AWS ACCOUNT INFORMATION"
+          echo "=============================================="
+
+          aws sts get-caller-identity
+
+          echo ""
+          echo "AWS CLI VERSION"
+          aws --version
+
+
+      # ============================================================
+      # CREATE INVENTORY DIRECTORY
+      # ============================================================
+
+      - name: Prepare Inventory Directory
+        shell: bash
+        run: |
+
+          mkdir -p aws-inventory
+
+          touch aws-inventory/aws-resource-inventory.txt
+          touch aws-inventory/aws-resource-inventory.csv
+
+
+      # ============================================================
+      # GET AWS REGIONS
+      # ============================================================
+
+      - name: Get AWS Regions
+        shell: bash
+        run: |
+
+          echo "Getting enabled AWS regions..."
+
+          aws ec2 describe-regions \
+            --all-regions \
+            --query 'Regions[?OptInStatus==`opt-in-not-required` || OptInStatus==`opted-in`].RegionName' \
+            --output text |
+          tr '\t' '\n' |
+          sort > aws-inventory/regions.txt
+
+          echo ""
+          echo "AWS REGIONS"
+          echo "=============================================="
+
+          cat aws-inventory/regions.txt
+
+
+      # ============================================================
+      # GENERATE AWS RESOURCE INVENTORY
+      # ============================================================
+
       - name: Generate AWS Resource Table
         shell: bash
         run: |
+
           set +e
 
-          echo ""
-          echo "================================================================================"
-          echo "                         AWS RESOURCE INVENTORY"
-          echo "================================================================================"
-          printf "%-40s %-30s %-20s %-15s\n" \
-            "RESOURCE NAME" "RESOURCE TYPE" "LOCATION" "STATUS"
+          OUTPUT="aws-inventory/aws-resource-inventory.txt"
+          CSV_OUTPUT="aws-inventory/aws-resource-inventory.csv"
 
-          echo "--------------------------------------------------------------------------------"
+          # ========================================================
+          # TABLE HEADER
+          # ========================================================
+
+          print_header() {
+
+            echo ""
+            echo "===================================================================================================================="
+            echo "$1"
+            echo "===================================================================================================================="
+
+            printf "%-40s %-30s %-45s %-20s %-20s\n" \
+              "RESOURCE NAME" \
+              "RESOURCE TYPE" \
+              "RESOURCE ID" \
+              "LOCATION" \
+              "STATUS"
+
+            echo "--------------------------------------------------------------------------------------------------------------------"
+
+          }
+
+
+          # ========================================================
+          # PRINT RESOURCE
+          # ========================================================
+
+          print_resource() {
+
+            NAME="$1"
+            TYPE="$2"
+            ID="$3"
+            LOCATION="$4"
+            STATUS="$5"
+
+            printf "%-40s %-30s %-45s %-20s %-20s\n" \
+              "$NAME" \
+              "$TYPE" \
+              "$ID" \
+              "$LOCATION" \
+              "$STATUS"
+
+            printf '"%s","%s","%s","%s","%s"\n' \
+              "$NAME" \
+              "$TYPE" \
+              "$ID" \
+              "$LOCATION" \
+              "$STATUS" >> "$CSV_OUTPUT"
+
+          }
+
+
+          # ========================================================
+          # INITIALIZE CSV
+          # ========================================================
+
+          echo '"RESOURCE NAME","RESOURCE TYPE","RESOURCE ID","LOCATION","STATUS"' \
+            > "$CSV_OUTPUT"
+
+
+          # ========================================================
+          # HEADER
+          # ========================================================
+
+          print_header "AWS RESOURCE INVENTORY" | tee -a "$OUTPUT"
+
+
+          # ========================================================
+          # REGIONAL RESOURCES
+          # ========================================================
 
           while read REGION
           do
 
-            # ============================================================
-            # EC2
-            # ============================================================
+            if [ -z "$REGION" ]; then
+              continue
+            fi
+
+            print_header "REGION: $REGION" | tee -a "$OUTPUT"
+
+
+            # ======================================================
+            # EC2 INSTANCES
+            # ======================================================
+
+            echo "### EC2 INSTANCES" | tee -a "$OUTPUT"
 
             aws ec2 describe-instances \
               --region "$REGION" \
-              --query 'Reservations[].Instances[].[InstanceId,State.Name]' \
+              --query 'Reservations[].Instances[].[InstanceId,InstanceId,State.Name]' \
               --output text 2>/dev/null |
-            while read NAME STATUS
+            while read ID NAME STATUS
             do
-              if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "EC2 Instance" "$REGION" "$STATUS"
+
+              if [ -n "$ID" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "EC2 Instance" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
               fi
+
             done
 
 
-            # ============================================================
+            # ======================================================
+            # AMI
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### AMIs" | tee -a "$OUTPUT"
+
+            aws ec2 describe-images \
+              --region "$REGION" \
+              --owners self \
+              --query 'Images[].[Name,ImageId,State]' \
+              --output text 2>/dev/null |
+            while read NAME ID STATUS
+            do
+
+              if [ -n "$ID" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "AMI" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # EBS VOLUMES
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### EBS VOLUMES" | tee -a "$OUTPUT"
+
+            aws ec2 describe-volumes \
+              --region "$REGION" \
+              --query 'Volumes[].[VolumeId,VolumeId,State]' \
+              --output text 2>/dev/null |
+            while read ID NAME STATUS
+            do
+
+              if [ -n "$ID" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "EBS Volume" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
             # VPC
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### VPC" | tee -a "$OUTPUT"
 
             aws ec2 describe-vpcs \
               --region "$REGION" \
-              --query 'Vpcs[].[VpcId,State]' \
+              --query 'Vpcs[].[VpcId,VpcId,State]' \
               --output text 2>/dev/null |
-            while read NAME STATUS
+            while read ID NAME STATUS
             do
-              if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "VPC" "$REGION" "$STATUS"
+
+              if [ -n "$ID" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "VPC" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
               fi
+
             done
 
 
-            # ============================================================
+            # ======================================================
             # SUBNETS
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### SUBNETS" | tee -a "$OUTPUT"
 
             aws ec2 describe-subnets \
               --region "$REGION" \
-              --query 'Subnets[].[SubnetId,State]' \
+              --query 'Subnets[].[SubnetId,SubnetId,State]' \
               --output text 2>/dev/null |
-            while read NAME STATUS
+            while read ID NAME STATUS
             do
-              if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "Subnet" "$REGION" "$STATUS"
+
+              if [ -n "$ID" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "Subnet" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
               fi
+
             done
 
 
-            # ============================================================
-            # SECURITY GROUPS
-            # ============================================================
+            # ======================================================
+            # ROUTE TABLES
+            # ======================================================
 
-            aws ec2 describe-security-groups \
+            echo "" | tee -a "$OUTPUT"
+            echo "### ROUTE TABLES" | tee -a "$OUTPUT"
+
+            aws ec2 describe-route-tables \
               --region "$REGION" \
-              --query 'SecurityGroups[].[GroupId,GroupName]' \
+              --query 'RouteTables[].[RouteTableId,RouteTableId]' \
               --output text 2>/dev/null |
             while read ID NAME
             do
+
               if [ -n "$ID" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "Security Group" "$REGION" "ACTIVE"
+
+                print_resource \
+                  "$NAME" \
+                  "Route Table" \
+                  "$ID" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
               fi
+
             done
 
 
-            # ============================================================
+            # ======================================================
+            # INTERNET GATEWAYS
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### INTERNET GATEWAYS" | tee -a "$OUTPUT"
+
+            aws ec2 describe-internet-gateways \
+              --region "$REGION" \
+              --query 'InternetGateways[].[InternetGatewayId,InternetGatewayId]' \
+              --output text 2>/dev/null |
+            while read ID NAME
+            do
+
+              if [ -n "$ID" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "Internet Gateway" \
+                  "$ID" \
+                  "$REGION" \
+                  "ATTACHED" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # ELASTIC IP
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### ELASTIC IP ADDRESSES" | tee -a "$OUTPUT"
+
+            aws ec2 describe-addresses \
+              --region "$REGION" \
+              --query 'Addresses[].[PublicIp,AllocationId,AssociationId]' \
+              --output text 2>/dev/null |
+            while read IP ALLOCATION ASSOCIATION
+            do
+
+              if [ -n "$IP" ]; then
+
+                if [ "$ASSOCIATION" = "None" ] || [ -z "$ASSOCIATION" ]; then
+                  STATUS="UNASSOCIATED"
+                else
+                  STATUS="ASSOCIATED"
+                fi
+
+                print_resource \
+                  "$IP" \
+                  "Elastic IP" \
+                  "$ALLOCATION" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # SECURITY GROUPS
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### SECURITY GROUPS" | tee -a "$OUTPUT"
+
+            aws ec2 describe-security-groups \
+              --region "$REGION" \
+              --query 'SecurityGroups[].[GroupName,GroupId]' \
+              --output text 2>/dev/null |
+            while read NAME ID
+            do
+
+              if [ -n "$ID" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "Security Group" \
+                  "$ID" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # VPC ENDPOINTS
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### VPC ENDPOINTS" | tee -a "$OUTPUT"
+
+            aws ec2 describe-vpc-endpoints \
+              --region "$REGION" \
+              --query 'VpcEndpoints[].[ServiceName,VpcEndpointId,State]' \
+              --output text 2>/dev/null |
+            while read NAME ID STATUS
+            do
+
+              if [ -n "$ID" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "VPC Endpoint" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
             # NAT GATEWAYS
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### NAT GATEWAYS" | tee -a "$OUTPUT"
 
             aws ec2 describe-nat-gateways \
               --region "$REGION" \
-              --query 'NatGateways[].[NatGatewayId,State]' \
+              --query 'NatGateways[].[NatGatewayId,NatGatewayId,State]' \
               --output text 2>/dev/null |
-            while read NAME STATUS
+            while read ID NAME STATUS
             do
-              if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "NAT Gateway" "$REGION" "$STATUS"
+
+              if [ -n "$ID" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "NAT Gateway" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
               fi
+
             done
 
 
-            # ============================================================
+            # ======================================================
             # LOAD BALANCERS
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### LOAD BALANCERS" | tee -a "$OUTPUT"
 
             aws elbv2 describe-load-balancers \
               --region "$REGION" \
-              --query 'LoadBalancers[].[LoadBalancerName,State.Code]' \
+              --query 'LoadBalancers[].[LoadBalancerName,LoadBalancerArn,State.Code]' \
               --output text 2>/dev/null |
-            while read NAME STATUS
+            while read NAME ID STATUS
             do
+
               if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "Load Balancer" "$REGION" "$STATUS"
+
+                print_resource \
+                  "$NAME" \
+                  "Load Balancer" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
               fi
+
             done
 
 
-            # ============================================================
+            # ======================================================
             # TARGET GROUPS
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### TARGET GROUPS" | tee -a "$OUTPUT"
 
             aws elbv2 describe-target-groups \
               --region "$REGION" \
-              --query 'TargetGroups[].[TargetGroupName]' \
+              --query 'TargetGroups[].[TargetGroupName,TargetGroupArn]' \
               --output text 2>/dev/null |
-            while read NAME
+            while read NAME ID
             do
+
               if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "Target Group" "$REGION" "ACTIVE"
+
+                print_resource \
+                  "$NAME" \
+                  "Target Group" \
+                  "$ID" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
               fi
+
             done
 
 
-            # ============================================================
+            # ======================================================
             # ECS CLUSTERS
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### ECS CLUSTERS" | tee -a "$OUTPUT"
 
             CLUSTERS=$(aws ecs list-clusters \
               --region "$REGION" \
@@ -154,15 +587,22 @@
                 --query 'clusters[0].status' \
                 --output text 2>/dev/null)
 
-              printf "%-40s %-30s %-20s %-15s\n" \
-                "$CLUSTER_NAME" "ECS Cluster" "$REGION" "$STATUS"
+              print_resource \
+                "$CLUSTER_NAME" \
+                "ECS Cluster" \
+                "$CLUSTER" \
+                "$REGION" \
+                "$STATUS" | tee -a "$OUTPUT"
 
             done
 
 
-            # ============================================================
+            # ======================================================
             # ECS SERVICES
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### ECS SERVICES" | tee -a "$OUTPUT"
 
             for CLUSTER in $CLUSTERS
             do
@@ -185,35 +625,155 @@
                   --query 'services[0].status' \
                   --output text 2>/dev/null)
 
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$SERVICE_NAME" "ECS Service" "$REGION" "$STATUS"
+                RUNNING=$(aws ecs describe-services \
+                  --region "$REGION" \
+                  --cluster "$CLUSTER" \
+                  --services "$SERVICE" \
+                  --query 'services[0].runningCount' \
+                  --output text 2>/dev/null)
+
+                DESIRED=$(aws ecs describe-services \
+                  --region "$REGION" \
+                  --cluster "$CLUSTER" \
+                  --services "$SERVICE" \
+                  --query 'services[0].desiredCount' \
+                  --output text 2>/dev/null)
+
+                print_resource \
+                  "$SERVICE_NAME" \
+                  "ECS Service" \
+                  "$SERVICE" \
+                  "$REGION" \
+                  "$STATUS ($RUNNING/$DESIRED)" | tee -a "$OUTPUT"
 
               done
 
             done
 
 
-            # ============================================================
-            # ECR
-            # ============================================================
+            # ======================================================
+            # ECS TASK DEFINITIONS
+            # ======================================================
 
-            aws ecr describe-repositories \
+            echo "" | tee -a "$OUTPUT"
+            echo "### ECS TASK DEFINITIONS" | tee -a "$OUTPUT"
+
+            TASK_DEFINITIONS=$(aws ecs list-task-definitions \
               --region "$REGION" \
-              --query 'repositories[].[repositoryName]' \
-              --output text 2>/dev/null |
-            tr '\t' '\n' |
-            while read NAME
+              --query 'taskDefinitionArns[]' \
+              --output text 2>/dev/null)
+
+            for TASK in $TASK_DEFINITIONS
             do
-              if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "ECR Repository" "$REGION" "ACTIVE"
-              fi
+
+              TASK_NAME=$(basename "$TASK")
+
+              STATUS=$(aws ecs describe-task-definition \
+                --region "$REGION" \
+                --task-definition "$TASK" \
+                --query 'taskDefinition.status' \
+                --output text 2>/dev/null)
+
+              print_resource \
+                "$TASK_NAME" \
+                "ECS Task Definition" \
+                "$TASK" \
+                "$REGION" \
+                "$STATUS" | tee -a "$OUTPUT"
+
             done
 
 
-            # ============================================================
+            # ======================================================
+            # ECR
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### ECR REPOSITORIES" | tee -a "$OUTPUT"
+
+            aws ecr describe-repositories \
+              --region "$REGION" \
+              --query 'repositories[].[repositoryName,repositoryArn]' \
+              --output text 2>/dev/null |
+            while read NAME ID
+            do
+
+              if [ -n "$NAME" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "ECR Repository" \
+                  "$ID" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # RDS DATABASES
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### RDS DATABASES" | tee -a "$OUTPUT"
+
+            aws rds describe-db-instances \
+              --region "$REGION" \
+              --query 'DBInstances[].[DBInstanceIdentifier,DBInstanceArn,DBInstanceStatus]' \
+              --output text 2>/dev/null |
+            while read NAME ID STATUS
+            do
+
+              if [ -n "$NAME" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "RDS Database" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # RDS / AURORA CLUSTERS
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### RDS CLUSTERS" | tee -a "$OUTPUT"
+
+            aws rds describe-db-clusters \
+              --region "$REGION" \
+              --query 'DBClusters[].[DBClusterIdentifier,DBClusterArn,Status]' \
+              --output text 2>/dev/null |
+            while read NAME ID STATUS
+            do
+
+              if [ -n "$NAME" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "RDS Cluster" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
             # DYNAMODB
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### DYNAMODB TABLES" | tee -a "$OUTPUT"
 
             aws dynamodb list-tables \
               --region "$REGION" \
@@ -222,6 +782,7 @@
             tr '\t' '\n' |
             while read NAME
             do
+
               if [ -n "$NAME" ]; then
 
                 STATUS=$(aws dynamodb describe-table \
@@ -230,52 +791,232 @@
                   --query 'Table.TableStatus' \
                   --output text 2>/dev/null)
 
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "DynamoDB Table" "$REGION" "$STATUS"
+                ARN=$(aws dynamodb describe-table \
+                  --region "$REGION" \
+                  --table-name "$NAME" \
+                  --query 'Table.TableArn' \
+                  --output text 2>/dev/null)
+
+                print_resource \
+                  "$NAME" \
+                  "DynamoDB Table" \
+                  "$ARN" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
 
               fi
+
             done
 
 
-            # ============================================================
+            # ======================================================
             # LAMBDA
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### LAMBDA FUNCTIONS" | tee -a "$OUTPUT"
 
             aws lambda list-functions \
               --region "$REGION" \
-              --query 'Functions[].[FunctionName]' \
+              --query 'Functions[].[FunctionName,FunctionArn]' \
               --output text 2>/dev/null |
-            tr '\t' '\n' |
-            while read NAME
+            while read NAME ID
             do
+
               if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "Lambda Function" "$REGION" "ACTIVE"
+
+                print_resource \
+                  "$NAME" \
+                  "Lambda Function" \
+                  "$ID" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
               fi
+
             done
 
 
-            # ============================================================
+            # ======================================================
             # CLOUDWATCH LOG GROUPS
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### CLOUDWATCH LOG GROUPS" | tee -a "$OUTPUT"
 
             aws logs describe-log-groups \
               --region "$REGION" \
-              --query 'logGroups[].logGroupName' \
+              --query 'logGroups[].[logGroupName,logGroupArn]' \
               --output text 2>/dev/null |
-            tr '\t' '\n' |
-            while read NAME
+            while read NAME ID
             do
+
               if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "CloudWatch Log Group" "$REGION" "ACTIVE"
+
+                print_resource \
+                  "$NAME" \
+                  "CloudWatch Log Group" \
+                  "$ID" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
               fi
+
             done
 
 
-            # ============================================================
+            # ======================================================
+            # CLOUDWATCH ALARMS
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### CLOUDWATCH ALARMS" | tee -a "$OUTPUT"
+
+            aws cloudwatch describe-alarms \
+              --region "$REGION" \
+              --query 'MetricAlarms[].[AlarmName,AlarmArn,StateValue]' \
+              --output text 2>/dev/null |
+            while read NAME ID STATUS
+            do
+
+              if [ -n "$NAME" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "CloudWatch Alarm" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # SECRETS MANAGER
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### SECRETS MANAGER" | tee -a "$OUTPUT"
+
+            aws secretsmanager list-secrets \
+              --region "$REGION" \
+              --query 'SecretList[].[Name,ARN]' \
+              --output text 2>/dev/null |
+            while read NAME ID
+            do
+
+              if [ -n "$NAME" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "Secrets Manager Secret" \
+                  "$ID" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # SSM PARAMETERS
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### SSM PARAMETERS" | tee -a "$OUTPUT"
+
+            aws ssm describe-parameters \
+              --region "$REGION" \
+              --query 'Parameters[].[Name,Type]' \
+              --output text 2>/dev/null |
+            while read NAME TYPE
+            do
+
+              if [ -n "$NAME" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "SSM Parameter" \
+                  "$NAME" \
+                  "$REGION" \
+                  "$TYPE" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # SQS
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### SQS QUEUES" | tee -a "$OUTPUT"
+
+            aws sqs list-queues \
+              --region "$REGION" \
+              --query 'QueueUrls[]' \
+              --output text 2>/dev/null |
+            tr '\t' '\n' |
+            while read URL
+            do
+
+              if [ -n "$URL" ]; then
+
+                NAME=$(basename "$URL")
+
+                print_resource \
+                  "$NAME" \
+                  "SQS Queue" \
+                  "$URL" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # SNS
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### SNS TOPICS" | tee -a "$OUTPUT"
+
+            aws sns list-topics \
+              --region "$REGION" \
+              --query 'Topics[].TopicArn' \
+              --output text 2>/dev/null |
+            tr '\t' '\n' |
+            while read ARN
+            do
+
+              if [ -n "$ARN" ]; then
+
+                NAME=$(basename "$ARN")
+
+                print_resource \
+                  "$NAME" \
+                  "SNS Topic" \
+                  "$ARN" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
             # CODEDEPLOY
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### CODEDEPLOY APPLICATIONS" | tee -a "$OUTPUT"
 
             aws deploy list-applications \
               --region "$REGION" \
@@ -284,16 +1025,27 @@
             tr '\t' '\n' |
             while read NAME
             do
+
               if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "CodeDeploy Application" "$REGION" "ACTIVE"
+
+                print_resource \
+                  "$NAME" \
+                  "CodeDeploy Application" \
+                  "$NAME" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
               fi
+
             done
 
 
-            # ============================================================
+            # ======================================================
             # CODEBUILD
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### CODEBUILD PROJECTS" | tee -a "$OUTPUT"
 
             aws codebuild list-projects \
               --region "$REGION" \
@@ -302,16 +1054,27 @@
             tr '\t' '\n' |
             while read NAME
             do
+
               if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "CodeBuild Project" "$REGION" "ACTIVE"
+
+                print_resource \
+                  "$NAME" \
+                  "CodeBuild Project" \
+                  "$NAME" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
               fi
+
             done
 
 
-            # ============================================================
+            # ======================================================
             # CODEPIPELINE
-            # ============================================================
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### CODEPIPELINE" | tee -a "$OUTPUT"
 
             aws codepipeline list-pipelines \
               --region "$REGION" \
@@ -320,28 +1083,150 @@
             tr '\t' '\n' |
             while read NAME
             do
+
               if [ -n "$NAME" ]; then
-                printf "%-40s %-30s %-20s %-15s\n" \
-                  "$NAME" "CodePipeline" "$REGION" "ACTIVE"
+
+                print_resource \
+                  "$NAME" \
+                  "CodePipeline" \
+                  "$NAME" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
               fi
+
             done
+
+
+            # ======================================================
+            # AUTO SCALING GROUPS
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### AUTO SCALING GROUPS" | tee -a "$OUTPUT"
+
+            aws autoscaling describe-auto-scaling-groups \
+              --region "$REGION" \
+              --query 'AutoScalingGroups[].[AutoScalingGroupName,AutoScalingGroupARN]' \
+              --output text 2>/dev/null |
+            while read NAME ID
+            do
+
+              if [ -n "$NAME" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "Auto Scaling Group" \
+                  "$ID" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # LAUNCH TEMPLATES
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### LAUNCH TEMPLATES" | tee -a "$OUTPUT"
+
+            aws ec2 describe-launch-templates \
+              --region "$REGION" \
+              --query 'LaunchTemplates[].[LaunchTemplateName,LaunchTemplateId]' \
+              --output text 2>/dev/null |
+            while read NAME ID
+            do
+
+              if [ -n "$NAME" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "Launch Template" \
+                  "$ID" \
+                  "$REGION" \
+                  "ACTIVE" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # ELASTICACHE
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### ELASTICACHE" | tee -a "$OUTPUT"
+
+            aws elasticache describe-cache-clusters \
+              --region "$REGION" \
+              --query 'CacheClusters[].[CacheClusterId,CacheClusterId,CacheClusterStatus]' \
+              --output text 2>/dev/null |
+            while read NAME ID STATUS
+            do
+
+              if [ -n "$NAME" ]; then
+
+                print_resource \
+                  "$NAME" \
+                  "ElastiCache" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            # ======================================================
+            # EFS
+            # ======================================================
+
+            echo "" | tee -a "$OUTPUT"
+            echo "### EFS FILE SYSTEMS" | tee -a "$OUTPUT"
+
+            aws efs describe-file-systems \
+              --region "$REGION" \
+              --query 'FileSystems[].[Name,FileSystemId,LifeCycleState]' \
+              --output text 2>/dev/null |
+            while read NAME ID STATUS
+            do
+
+              if [ -n "$ID" ]; then
+
+                if [ "$NAME" = "None" ] || [ -z "$NAME" ]; then
+                  NAME="$ID"
+                fi
+
+                print_resource \
+                  "$NAME" \
+                  "EFS File System" \
+                  "$ID" \
+                  "$REGION" \
+                  "$STATUS" | tee -a "$OUTPUT"
+
+              fi
+
+            done
+
+
+            echo "" | tee -a "$OUTPUT"
+            echo "====================================================================================================================" | tee -a "$OUTPUT"
+            echo "COMPLETED REGION: $REGION" | tee -a "$OUTPUT"
+            echo "====================================================================================================================" | tee -a "$OUTPUT"
 
           done < aws-inventory/regions.txt
 
 
-          # ============================================================
+          # ========================================================
           # S3 - GLOBAL
-          # ============================================================
+          # ========================================================
 
-          echo ""
-          echo "================================================================================"
-          echo "S3 BUCKETS"
-          echo "================================================================================"
-
-          printf "%-40s %-30s %-20s %-15s\n" \
-            "RESOURCE NAME" "RESOURCE TYPE" "LOCATION" "STATUS"
-
-          echo "--------------------------------------------------------------------------------"
+          print_header "S3 BUCKETS - GLOBAL" | tee -a "$OUTPUT"
 
           aws s3api list-buckets \
             --query 'Buckets[].Name' \
@@ -349,6 +1234,7 @@
           tr '\t' '\n' |
           while read NAME
           do
+
             if [ -n "$NAME" ]; then
 
               LOCATION=$(aws s3api get-bucket-location \
@@ -360,65 +1246,206 @@
                 LOCATION="us-east-1"
               fi
 
-              printf "%-40s %-30s %-20s %-15s\n" \
-                "$NAME" "S3 Bucket" "$LOCATION" "ACTIVE"
+              print_resource \
+                "$NAME" \
+                "S3 Bucket" \
+                "$NAME" \
+                "$LOCATION" \
+                "ACTIVE" | tee -a "$OUTPUT"
 
             fi
+
           done
 
 
-          # ============================================================
-          # IAM - GLOBAL
-          # ============================================================
+          # ========================================================
+          # IAM ROLES
+          # ========================================================
 
-          echo ""
-          echo "================================================================================"
-          echo "IAM RESOURCES"
-          echo "================================================================================"
-
-          printf "%-40s %-30s %-20s %-15s\n" \
-            "RESOURCE NAME" "RESOURCE TYPE" "LOCATION" "STATUS"
-
-          echo "--------------------------------------------------------------------------------"
+          print_header "IAM ROLES - GLOBAL" | tee -a "$OUTPUT"
 
           aws iam list-roles \
-            --query 'Roles[].RoleName' \
+            --query 'Roles[].[RoleName,Arn]' \
             --output text 2>/dev/null |
-          tr '\t' '\n' |
-          while read NAME
+          while read NAME ID
           do
+
             if [ -n "$NAME" ]; then
-              printf "%-40s %-30s %-20s %-15s\n" \
-                "$NAME" "IAM Role" "Global" "ACTIVE"
+
+              print_resource \
+                "$NAME" \
+                "IAM Role" \
+                "$ID" \
+                "Global" \
+                "ACTIVE" | tee -a "$OUTPUT"
+
             fi
+
           done
+
+
+          # ========================================================
+          # IAM USERS
+          # ========================================================
+
+          print_header "IAM USERS - GLOBAL" | tee -a "$OUTPUT"
 
           aws iam list-users \
-            --query 'Users[].UserName' \
+            --query 'Users[].[UserName,Arn]' \
             --output text 2>/dev/null |
-          tr '\t' '\n' |
-          while read NAME
+          while read NAME ID
           do
+
             if [ -n "$NAME" ]; then
-              printf "%-40s %-30s %-20s %-15s\n" \
-                "$NAME" "IAM User" "Global" "ACTIVE"
+
+              print_resource \
+                "$NAME" \
+                "IAM User" \
+                "$ID" \
+                "Global" \
+                "ACTIVE" | tee -a "$OUTPUT"
+
             fi
+
           done
+
+
+          # ========================================================
+          # IAM GROUPS
+          # ========================================================
+
+          print_header "IAM GROUPS - GLOBAL" | tee -a "$OUTPUT"
 
           aws iam list-groups \
-            --query 'Groups[].GroupName' \
+            --query 'Groups[].[GroupName,Arn]' \
             --output text 2>/dev/null |
-          tr '\t' '\n' |
-          while read NAME
+          while read NAME ID
           do
+
             if [ -n "$NAME" ]; then
-              printf "%-40s %-30s %-20s %-15s\n" \
-                "$NAME" "IAM Group" "Global" "ACTIVE"
+
+              print_resource \
+                "$NAME" \
+                "IAM Group" \
+                "$ID" \
+                "Global" \
+                "ACTIVE" | tee -a "$OUTPUT"
+
             fi
+
           done
 
 
+          # ========================================================
+          # KMS KEYS
+          # ========================================================
+
+          print_header "KMS KEYS" | tee -a "$OUTPUT"
+
+          aws kms list-keys \
+            --query 'Keys[].KeyId' \
+            --output text 2>/dev/null |
+          tr '\t' '\n' |
+          while read KEY_ID
+          do
+
+            if [ -n "$KEY_ID" ]; then
+
+              STATUS=$(aws kms describe-key \
+                --key-id "$KEY_ID" \
+                --query 'KeyMetadata.KeyState' \
+                --output text 2>/dev/null)
+
+              print_resource \
+                "$KEY_ID" \
+                "KMS Key" \
+                "$KEY_ID" \
+                "Global" \
+                "$STATUS" | tee -a "$OUTPUT"
+
+            fi
+
+          done
+
+
+          # ========================================================
+          # ROUTE 53
+          # ========================================================
+
+          print_header "ROUTE 53 HOSTED ZONES - GLOBAL" | tee -a "$OUTPUT"
+
+          aws route53 list-hosted-zones \
+            --query 'HostedZones[].[Name,Id]' \
+            --output text 2>/dev/null |
+          while read NAME ID
+          do
+
+            if [ -n "$NAME" ]; then
+
+              print_resource \
+                "$NAME" \
+                "Route53 Hosted Zone" \
+                "$ID" \
+                "Global" \
+                "ACTIVE" | tee -a "$OUTPUT"
+
+            fi
+
+          done
+
+
+          # ========================================================
+          # CLOUDFRONT
+          # ========================================================
+
+          print_header "CLOUDFRONT DISTRIBUTIONS - GLOBAL" | tee -a "$OUTPUT"
+
+          aws cloudfront list-distributions \
+            --query 'DistributionList.Items[].[DomainName,Id,Status]' \
+            --output text 2>/dev/null |
+          while read NAME ID STATUS
+          do
+
+            if [ -n "$ID" ]; then
+
+              print_resource \
+                "$NAME" \
+                "CloudFront" \
+                "$ID" \
+                "Global" \
+                "$STATUS" | tee -a "$OUTPUT"
+
+            fi
+
+          done
+
+
+          # ========================================================
+          # FINAL
+          # ========================================================
+
+          echo "" | tee -a "$OUTPUT"
+
+          echo "============================================================================================================" | tee -a "$OUTPUT"
+          echo "                                      INVENTORY COMPLETED"
+          echo "============================================================================================================" | tee -a "$OUTPUT"
+
           echo ""
-          echo "================================================================================"
-          echo "                         INVENTORY COMPLETED"
-          echo "================================================================================"
+          echo "Inventory files generated:"
+          echo "TXT : $OUTPUT"
+          echo "CSV : $CSV_OUTPUT"
+
+
+      # ============================================================
+      # UPLOAD INVENTORY AS ARTIFACT
+      # ============================================================
+
+      - name: Upload AWS Inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-resource-inventory
+          path: |
+            aws-inventory/aws-resource-inventory.txt
+            aws-inventory/aws-resource-inventory.csv
+            aws-inventory/regions.txt
+          retention-days: 30
