@@ -1,6 +1,10 @@
 name: Cleanup ECS Fullstack AWS Resources
 
 on:
+  push:
+    branches:
+      - main
+      - snv-test
   workflow_dispatch:
 
 permissions:
