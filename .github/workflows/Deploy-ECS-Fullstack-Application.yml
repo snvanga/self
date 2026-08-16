@@ -1,0 +1,236 @@
+name: Deploy ECS Fullstack Application
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+  # Change these to match your Terraform resources
+  ECR_FRONTEND_REPOSITORY: ecs-fullstack-frontend
+  ECR_BACKEND_REPOSITORY: ecs-fullstack-backend
+
+  ECS_CLUSTER: ecs-fullstack-cluster
+  ECS_FRONTEND_SERVICE: ecs-fullstack-frontend
+  ECS_BACKEND_SERVICE: ecs-fullstack-backend
+
+  FRONTEND_TASK_DEFINITION: .github/ecs/frontend-task-definition.json
+  BACKEND_TASK_DEFINITION: .github/ecs/backend-task-definition.json
+
+jobs:
+
+  terraform:
+    name: Terraform Infrastructure
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: Infrastructure
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+
+
+  frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Frontend Image
+        working-directory: Code/client
+        run: |
+          docker build \
+            -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:${{ github.sha }} .
+
+      - name: Push Frontend Image
+        run: |
+          docker push \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:${{ github.sha }}
+
+      - name: Save Frontend Image
+        run: |
+          echo "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:${{ github.sha }}" \
+            > frontend-image.txt
+
+      - name: Upload Frontend Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-image
+          path: frontend-image.txt
+
+
+  backend:
+    name: Build Backend
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Backend Image
+        working-directory: Code/server
+        run: |
+          docker build \
+            -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ github.sha }} .
+
+      - name: Push Backend Image
+        run: |
+          docker push \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ github.sha }}
+
+      - name: Save Backend Image
+        run: |
+          echo "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ github.sha }}" \
+            > backend-image.txt
+
+      - name: Upload Backend Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-image
+          path: backend-image.txt
+
+
+  deploy:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    needs:
+      - frontend
+      - backend
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Download Frontend Image
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-image
+
+      - name: Download Backend Image
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-image
+
+      - name: Get Frontend Image
+        id: frontend
+        run: |
+          echo "image=$(cat frontend-image.txt)" >> $GITHUB_OUTPUT
+
+      - name: Get Backend Image
+        id: backend
+        run: |
+          echo "image=$(cat backend-image.txt)" >> $GITHUB_OUTPUT
+
+      - name: Download ECS task definitions
+        run: |
+          mkdir -p .github/ecs
+
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_FRONTEND_SERVICE }} \
+            --query taskDefinition \
+            > frontend-task-definition.json
+
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_BACKEND_SERVICE }} \
+            --query taskDefinition \
+            > backend-task-definition.json
+
+      - name: Render Frontend task definition
+        id: frontend-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: frontend-task-definition.json
+          container-name: frontend
+          image: ${{ steps.frontend.outputs.image }}
+
+      - name: Deploy Frontend
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.frontend-task.outputs.task-definition }}
+          service: ${{ env.ECS_FRONTEND_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Render Backend task definition
+        id: backend-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: backend-task-definition.json
+          container-name: backend
+          image: ${{ steps.backend.outputs.image }}
+
+      - name: Deploy Backend
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.backend-task.outputs.task-definition }}
+          service: ${{ env.ECS_BACKEND_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
