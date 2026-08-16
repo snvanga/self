@@ -1,11 +1,6 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: MIT-0
+FROM node:20-alpine AS build-stage
 
-FROM public.ecr.aws/bitnami/node:latest
-
-RUN mkdir -p /home/node/app/node_modules
-
-WORKDIR /home/node/app
+WORKDIR /app
 
 COPY package*.json ./
 
@@ -13,6 +8,12 @@ RUN npm install
 
 COPY . .
 
-EXPOSE 3001
+RUN npm run build
 
-CMD [ "npm", "start" ]
+FROM nginx:alpine AS production-stage
+
+COPY --from=build-stage /app/build /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
