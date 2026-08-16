@@ -1,0 +1,245 @@
+name: Cleanup ECS Fullstack AWS Resources
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+
+jobs:
+  cleanup:
+    name: Delete ECS Fullstack Resources
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Verify AWS account
+        run: |
+          aws sts get-caller-identity
+
+      # ==========================================================
+      # ECS SERVICES
+      # ==========================================================
+
+      - name: Delete ECS services
+        run: |
+          aws ecs update-service \
+            --cluster ecs-fullstack \
+            --service ecs-fullstack-client \
+            --desired-count 0 || true
+
+          aws ecs update-service \
+            --cluster ecs-fullstack \
+            --service ecs-fullstack-server \
+            --desired-count 0 || true
+
+          aws ecs delete-service \
+            --cluster ecs-fullstack \
+            --service ecs-fullstack-client \
+            --force || true
+
+          aws ecs delete-service \
+            --cluster ecs-fullstack \
+            --service ecs-fullstack-server \
+            --force || true
+
+      # ==========================================================
+      # ECS CLUSTER
+      # ==========================================================
+
+      - name: Delete ECS cluster
+        run: |
+          aws ecs delete-cluster \
+            --cluster ecs-fullstack || true
+
+      # ==========================================================
+      # ECR
+      # ==========================================================
+
+      - name: Delete ECR repositories
+        run: |
+          aws ecr delete-repository \
+            --repository-name repo-client \
+            --force || true
+
+          aws ecr delete-repository \
+            --repository-name repo-server \
+            --force || true
+
+      # ==========================================================
+      # CODEDEPLOY
+      # ==========================================================
+
+      - name: Delete CodeDeploy deployment groups
+        run: |
+          aws deploy delete-deployment-group \
+            --application-name Deploy-ecs-fullstack-client \
+            --deployment-group-name ecs-fullstack-client || true
+
+          aws deploy delete-deployment-group \
+            --application-name Deploy-ecs-fullstack-server \
+            --deployment-group-name ecs-fullstack-server || true
+
+      - name: Delete CodeDeploy applications
+        run: |
+          aws deploy delete-application \
+            --application-name Deploy-ecs-fullstack-client || true
+
+          aws deploy delete-application \
+            --application-name Deploy-ecs-fullstack-server || true
+
+      # ==========================================================
+      # CLOUDWATCH LOG GROUPS
+      # ==========================================================
+
+      - name: Delete CloudWatch log groups
+        run: |
+          aws logs delete-log-group \
+            --log-group-name /ecs/task-definition-ecs-fullstack-client || true
+
+          aws logs delete-log-group \
+            --log-group-name /ecs/task-definition-ecs-fullstack-server || true
+
+      # ==========================================================
+      # DYNAMODB
+      # ==========================================================
+
+      - name: Delete DynamoDB table
+        run: |
+          aws dynamodb delete-table \
+            --table-name assets-table-ecs-fullstack || true
+
+      # ==========================================================
+      # IAM ROLES
+      # ==========================================================
+
+      - name: Delete IAM role policies
+        run: |
+          for ROLE in \
+            ECS-task-excecution-Role \
+            ECS-task-Role \
+            CodeDeploy-Role
+          do
+            echo "Removing policies from $ROLE"
+
+            aws iam list-attached-role-policies \
+              --role-name "$ROLE" \
+              --query 'AttachedPolicies[].PolicyArn' \
+              --output text 2>/dev/null |
+            tr '\t' '\n' |
+            while read POLICY_ARN
+            do
+              if [ -n "$POLICY_ARN" ]; then
+                aws iam detach-role-policy \
+                  --role-name "$ROLE" \
+                  --policy-arn "$POLICY_ARN" || true
+              fi
+            done
+
+            aws iam list-role-policies \
+              --role-name "$ROLE" \
+              --query 'PolicyNames[]' \
+              --output text 2>/dev/null |
+            tr '\t' '\n' |
+            while read POLICY_NAME
+            do
+              if [ -n "$POLICY_NAME" ]; then
+                aws iam delete-role-policy \
+                  --role-name "$ROLE" \
+                  --policy-name "$POLICY_NAME" || true
+              fi
+            done
+          done
+
+      - name: Delete IAM roles
+        run: |
+          aws iam delete-role \
+            --role-name ECS-task-excecution-Role || true
+
+          aws iam delete-role \
+            --role-name ECS-task-Role || true
+
+          aws iam delete-role \
+            --role-name CodeDeploy-Role || true
+
+      # ==========================================================
+      # LOAD BALANCERS
+      # ==========================================================
+
+      - name: Delete Load Balancers
+        run: |
+          for LB in \
+            alb-ecs-fullstack-ser \
+            alb-ecs-fullstack-cli
+          do
+            ARN=$(aws elbv2 describe-load-balancers \
+              --names "$LB" \
+              --query 'LoadBalancers[0].LoadBalancerArn' \
+              --output text 2>/dev/null || true)
+
+            if [ "$ARN" != "None" ] && [ -n "$ARN" ]; then
+              echo "Deleting Load Balancer: $LB"
+              aws elbv2 delete-load-balancer \
+                --load-balancer-arn "$ARN"
+            fi
+          done
+
+      - name: Wait for Load Balancers
+        run: |
+          sleep 30
+
+      # ==========================================================
+      # TARGET GROUPS
+      # ==========================================================
+
+      - name: Delete Target Groups
+        run: |
+          for TG in \
+            tg-ecs-fullstack-c-g \
+            tg-ecs-fullstack-c-b \
+            tg-ecs-fullstack-s-g \
+            tg-ecs-fullstack-s-b
+          do
+            ARN=$(aws elbv2 describe-target-groups \
+              --names "$TG" \
+              --query 'TargetGroups[0].TargetGroupArn' \
+              --output text 2>/dev/null || true)
+
+            if [ "$ARN" != "None" ] && [ -n "$ARN" ]; then
+              echo "Deleting Target Group: $TG"
+              aws elbv2 delete-target-group \
+                --target-group-arn "$ARN"
+            fi
+          done
+
+      # ==========================================================
+      # FINAL CHECK
+      # ==========================================================
+
+      - name: Cleanup verification
+        run: |
+          echo "======================================"
+          echo "Cleanup completed"
+          echo "======================================"
+
+          echo "ECS clusters:"
+          aws ecs list-clusters
+
+          echo "ECR repositories:"
+          aws ecr describe-repositories || true
+
+          echo "DynamoDB tables:"
+          aws dynamodb list-tables
+
+          echo "CodeDeploy applications:"
+          aws deploy list-applications
