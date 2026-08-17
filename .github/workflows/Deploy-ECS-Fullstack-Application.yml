@@ -5,11 +5,8 @@ on:
     branches:
       - main
       - snv-test
-  workflow_dispatch:
 
-concurrency:
-  group: ecs-fullstack-deployment
-  cancel-in-progress: false
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,14 +14,21 @@ permissions:
 env:
   TF_VAR_aws_region: ${{ secrets.AWS_DEFAULT_REGION }}
   TF_VAR_environment_name: ecs-fullstack
+
   ECR_FRONTEND_REPOSITORY: repo-client
   ECR_BACKEND_REPOSITORY: repo-server
+
   ECS_CLUSTER: Cluster-ecs-fullstack
   ECS_FRONTEND_SERVICE: Service-ecs-fullstack-client
   ECS_BACKEND_SERVICE: Service-ecs-fullstack-server
+
   TF_IN_AUTOMATION: true
 
 jobs:
+
+  # ==========================================================
+  # TERRAFORM INFRASTRUCTURE
+  # ==========================================================
 
   terraform:
     name: Terraform Apply
@@ -35,8 +39,17 @@ jobs:
         working-directory: ./amazon-ecs-fullstack-app-terraform-main/Infrastructure
 
     steps:
+
+      # --------------------------------------------------------
+      # CHECKOUT
+      # --------------------------------------------------------
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # AWS CREDENTIALS
+      # --------------------------------------------------------
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -45,9 +58,18 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
+      # --------------------------------------------------------
+      # VERIFY AWS
+      # --------------------------------------------------------
+
       - name: Verify AWS credentials
         run: |
+          echo "Checking AWS credentials..."
           aws sts get-caller-identity
+
+      # --------------------------------------------------------
+      # TERRAFORM
+      # --------------------------------------------------------
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -56,26 +78,50 @@ jobs:
         run: |
           terraform version
 
+      # --------------------------------------------------------
+      # TERRAFORM STATE BUCKET
+      # --------------------------------------------------------
+
       - name: Create Terraform State Bucket
+        shell: bash
         run: |
+          set -e
+
           BUCKET="ecs-fullstack-terraform-state-354482028472"
           REGION="${{ secrets.AWS_DEFAULT_REGION }}"
 
-          if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+          echo "========================================"
+          echo "Terraform State Bucket"
+          echo "========================================"
+
+          if aws s3api head-bucket \
+            --bucket "$BUCKET" \
+            2>/dev/null; then
+
             echo "Terraform state bucket already exists."
+
           else
+
             echo "Creating Terraform state bucket..."
 
             if [ "$REGION" = "us-east-1" ]; then
+
               aws s3api create-bucket \
                 --bucket "$BUCKET" \
                 --region "$REGION"
+
             else
+
               aws s3api create-bucket \
                 --bucket "$BUCKET" \
                 --region "$REGION" \
-                --create-bucket-configuration LocationConstraint="$REGION"
+                --create-bucket-configuration \
+                LocationConstraint="$REGION"
+
             fi
+
+            echo "Terraform state bucket created."
+
           fi
 
           echo "Enabling bucket versioning..."
@@ -84,34 +130,203 @@ jobs:
             --bucket "$BUCKET" \
             --versioning-configuration Status=Enabled
 
+          echo "Terraform state bucket is ready."
+
+      # --------------------------------------------------------
+      # TERRAFORM INIT
+      # --------------------------------------------------------
+
       - name: Terraform Init
         run: |
           terraform init -reconfigure
 
+      # --------------------------------------------------------
+      # SHOW CURRENT STATE
+      # --------------------------------------------------------
+
+      - name: Show Terraform State
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "CURRENT TERRAFORM STATE"
+          echo "========================================"
+
+          terraform state list || true
+
+      # --------------------------------------------------------
+      # ECS STATE RECONCILIATION
+      # --------------------------------------------------------
+      #
+      # If an ECS service already exists in AWS but is missing
+      # from Terraform state, automatically import it.
+      #
+      # No manual terraform import is required.
+      #
+      # --------------------------------------------------------
+
+      - name: Reconcile ECS Services
+        shell: bash
+        run: |
+          set -e
+
+          CLUSTER="Cluster-ecs-fullstack"
+
+          CLIENT_SERVICE="Service-ecs-fullstack-client"
+          SERVER_SERVICE="Service-ecs-fullstack-server"
+
+          CLIENT_ADDRESS="module.ecs_service_client.aws_ecs_service.ecs_service"
+          SERVER_ADDRESS="module.ecs_service_server.aws_ecs_service.ecs_service"
+
+          echo "========================================"
+          echo "ECS SERVICE RECONCILIATION"
+          echo "========================================"
+
+          # ====================================================
+          # CLIENT SERVICE
+          # ====================================================
+
+          echo ""
+          echo "Checking frontend ECS service..."
+
+          CLIENT_EXISTS=$(aws ecs describe-services \
+            --region "${{ secrets.AWS_DEFAULT_REGION }}" \
+            --cluster "$CLUSTER" \
+            --services "$CLIENT_SERVICE" \
+            --query 'services[0].serviceName' \
+            --output text 2>/dev/null || true)
+
+          if [ "$CLIENT_EXISTS" = "$CLIENT_SERVICE" ]; then
+
+            echo "Frontend service exists in AWS."
+
+            if terraform state list | grep -Fxq "$CLIENT_ADDRESS"; then
+
+              echo "Frontend service already exists in Terraform state."
+
+            else
+
+              echo "Frontend service is missing from Terraform state."
+              echo "Automatically importing frontend service..."
+
+              terraform import \
+                "$CLIENT_ADDRESS" \
+                "$CLUSTER/$CLIENT_SERVICE"
+
+              echo "Frontend service imported successfully."
+
+            fi
+
+          else
+
+            echo "Frontend service does not exist in AWS."
+            echo "Terraform will create the frontend service."
+
+          fi
+
+          # ====================================================
+          # SERVER SERVICE
+          # ====================================================
+
+          echo ""
+          echo "Checking backend ECS service..."
+
+          SERVER_EXISTS=$(aws ecs describe-services \
+            --region "${{ secrets.AWS_DEFAULT_REGION }}" \
+            --cluster "$CLUSTER" \
+            --services "$SERVER_SERVICE" \
+            --query 'services[0].serviceName' \
+            --output text 2>/dev/null || true)
+
+          if [ "$SERVER_EXISTS" = "$SERVER_SERVICE" ]; then
+
+            echo "Backend service exists in AWS."
+
+            if terraform state list | grep -Fxq "$SERVER_ADDRESS"; then
+
+              echo "Backend service already exists in Terraform state."
+
+            else
+
+              echo "Backend service is missing from Terraform state."
+              echo "Automatically importing backend service..."
+
+              terraform import \
+                "$SERVER_ADDRESS" \
+                "$CLUSTER/$SERVER_SERVICE"
+
+              echo "Backend service imported successfully."
+
+            fi
+
+          else
+
+            echo "Backend service does not exist in AWS."
+            echo "Terraform will create the backend service."
+
+          fi
+
+          # ====================================================
+          # FINAL STATE
+          # ====================================================
+
+          echo ""
+          echo "========================================"
+          echo "FINAL TERRAFORM STATE"
+          echo "========================================"
+
+          terraform state list
+
+      # --------------------------------------------------------
+      # TERRAFORM FORMAT
+      # --------------------------------------------------------
+
       - name: Terraform Format
         run: |
-          terraform fmt -recursive
+          terraform fmt -check -recursive
+
+      # --------------------------------------------------------
+      # TERRAFORM VALIDATE
+      # --------------------------------------------------------
 
       - name: Terraform Validate
         run: |
           terraform validate
 
+      # --------------------------------------------------------
+      # TERRAFORM PLAN
+      # --------------------------------------------------------
+
       - name: Terraform Plan
         run: |
           terraform plan
+
+      # --------------------------------------------------------
+      # TERRAFORM APPLY
+      # --------------------------------------------------------
 
       - name: Terraform Apply
         run: |
           terraform apply -auto-approve
 
+
+  # ==========================================================
+  # FRONTEND
+  # ==========================================================
+
   frontend:
     name: Build Frontend
     runs-on: ubuntu-latest
+
     needs: terraform
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # AWS CREDENTIALS
+      # --------------------------------------------------------
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -120,9 +335,17 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
+      # --------------------------------------------------------
+      # ECR LOGIN
+      # --------------------------------------------------------
+
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+
+      # --------------------------------------------------------
+      # BUILD FRONTEND
+      # --------------------------------------------------------
 
       - name: Build Frontend Docker Image
         working-directory: ./amazon-ecs-fullstack-app-terraform-main/Code/client
@@ -131,14 +354,27 @@ jobs:
             -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:${{ github.sha }} \
             .
 
+      # --------------------------------------------------------
+      # PUSH FRONTEND
+      # --------------------------------------------------------
+
       - name: Push Frontend Docker Image
         run: |
           docker push \
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:${{ github.sha }}
 
+      # --------------------------------------------------------
+      # SAVE IMAGE
+      # --------------------------------------------------------
+
       - name: Save Frontend Image
         run: |
-          echo "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:${{ github.sha }}" > frontend-image.txt
+          echo "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:${{ github.sha }}" \
+            > frontend-image.txt
+
+      # --------------------------------------------------------
+      # UPLOAD IMAGE INFORMATION
+      # --------------------------------------------------------
 
       - name: Upload Frontend Image
         uses: actions/upload-artifact@v4
@@ -146,14 +382,25 @@ jobs:
           name: frontend-image
           path: frontend-image.txt
 
+
+  # ==========================================================
+  # BACKEND
+  # ==========================================================
+
   backend:
     name: Build Backend
     runs-on: ubuntu-latest
+
     needs: terraform
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # AWS CREDENTIALS
+      # --------------------------------------------------------
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -162,9 +409,17 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
+      # --------------------------------------------------------
+      # ECR LOGIN
+      # --------------------------------------------------------
+
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+
+      # --------------------------------------------------------
+      # BUILD BACKEND
+      # --------------------------------------------------------
 
       - name: Build Backend Docker Image
         working-directory: ./amazon-ecs-fullstack-app-terraform-main/Code/server
@@ -173,20 +428,38 @@ jobs:
             -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ github.sha }} \
             .
 
+      # --------------------------------------------------------
+      # PUSH BACKEND
+      # --------------------------------------------------------
+
       - name: Push Backend Docker Image
         run: |
           docker push \
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ github.sha }}
 
+      # --------------------------------------------------------
+      # SAVE IMAGE
+      # --------------------------------------------------------
+
       - name: Save Backend Image
         run: |
-          echo "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ github.sha }}" > backend-image.txt
+          echo "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ github.sha }}" \
+            > backend-image.txt
+
+      # --------------------------------------------------------
+      # UPLOAD IMAGE INFORMATION
+      # --------------------------------------------------------
 
       - name: Upload Backend Image
         uses: actions/upload-artifact@v4
         with:
           name: backend-image
           path: backend-image.txt
+
+
+  # ==========================================================
+  # DEPLOY ECS
+  # ==========================================================
 
   deploy:
     name: Deploy to ECS
@@ -197,8 +470,17 @@ jobs:
       - backend
 
     steps:
+
+      # --------------------------------------------------------
+      # CHECKOUT
+      # --------------------------------------------------------
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # AWS CREDENTIALS
+      # --------------------------------------------------------
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -207,14 +489,30 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
+      # --------------------------------------------------------
+      # VERIFY ECS CLUSTER
+      # --------------------------------------------------------
+
       - name: Verify ECS Cluster
         run: |
+          echo "========================================"
+          echo "Checking ECS Cluster"
+          echo "========================================"
+
           aws ecs describe-clusters \
             --region "${{ secrets.AWS_DEFAULT_REGION }}" \
             --clusters "$ECS_CLUSTER"
 
+      # --------------------------------------------------------
+      # VERIFY ECS SERVICES
+      # --------------------------------------------------------
+
       - name: Verify ECS Services
         run: |
+          echo "========================================"
+          echo "Checking ECS Services"
+          echo "========================================"
+
           aws ecs describe-services \
             --region "${{ secrets.AWS_DEFAULT_REGION }}" \
             --cluster "$ECS_CLUSTER" \
@@ -222,28 +520,52 @@ jobs:
               "$ECS_FRONTEND_SERVICE" \
               "$ECS_BACKEND_SERVICE"
 
+      # --------------------------------------------------------
+      # ECR LOGIN
+      # --------------------------------------------------------
+
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
+
+      # --------------------------------------------------------
+      # DOWNLOAD FRONTEND IMAGE
+      # --------------------------------------------------------
 
       - name: Download Frontend Image
         uses: actions/download-artifact@v4
         with:
           name: frontend-image
 
+      # --------------------------------------------------------
+      # DOWNLOAD BACKEND IMAGE
+      # --------------------------------------------------------
+
       - name: Download Backend Image
         uses: actions/download-artifact@v4
         with:
           name: backend-image
+
+      # --------------------------------------------------------
+      # GET FRONTEND IMAGE
+      # --------------------------------------------------------
 
       - name: Get Frontend Image
         id: frontend
         run: |
           echo "image=$(cat frontend-image.txt)" >> "$GITHUB_OUTPUT"
 
+      # --------------------------------------------------------
+      # GET BACKEND IMAGE
+      # --------------------------------------------------------
+
       - name: Get Backend Image
         id: backend
         run: |
           echo "image=$(cat backend-image.txt)" >> "$GITHUB_OUTPUT"
+
+      # ========================================================
+      # FRONTEND DEPLOYMENT
+      # ========================================================
 
       - name: Get Frontend Task Definition
         run: |
@@ -251,7 +573,8 @@ jobs:
             --region "${{ secrets.AWS_DEFAULT_REGION }}" \
             --task-definition "$ECS_FRONTEND_SERVICE" \
             --query taskDefinition \
-            --output json > frontend-task-definition.json
+            --output json \
+            > frontend-task-definition.json
 
       - name: Render Frontend Task Definition
         id: frontend-task
@@ -269,13 +592,18 @@ jobs:
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
 
+      # ========================================================
+      # BACKEND DEPLOYMENT
+      # ========================================================
+
       - name: Get Backend Task Definition
         run: |
           aws ecs describe-task-definition \
             --region "${{ secrets.AWS_DEFAULT_REGION }}" \
             --task-definition "$ECS_BACKEND_SERVICE" \
             --query taskDefinition \
-            --output json > backend-task-definition.json
+            --output json \
+            > backend-task-definition.json
 
       - name: Render Backend Task Definition
         id: backend-task
@@ -292,3 +620,33 @@ jobs:
           service: ${{ env.ECS_BACKEND_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
+
+      # --------------------------------------------------------
+      # FINAL VERIFICATION
+      # --------------------------------------------------------
+
+      - name: Verify ECS Deployment
+        run: |
+          echo "========================================"
+          echo "ECS DEPLOYMENT STATUS"
+          echo "========================================"
+
+          aws ecs describe-services \
+            --region "${{ secrets.AWS_DEFAULT_REGION }}" \
+            --cluster "$ECS_CLUSTER" \
+            --services \
+              "$ECS_FRONTEND_SERVICE" \
+              "$ECS_BACKEND_SERVICE" \
+            --query 'services[].{
+              Service:serviceName,
+              Status:status,
+              Desired:desiredCount,
+              Running:runningCount,
+              Pending:pendingCount
+            }' \
+            --output table
+
+          echo ""
+          echo "========================================"
+          echo "ECS DEPLOYMENT COMPLETED"
+          echo "========================================"
