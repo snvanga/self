@@ -18,7 +18,7 @@ resource "aws_alb" "alb" {
   security_groups    = [var.security_group]
   load_balancer_type = "application"
 
-  internal    = false
+  internal     = false
   enable_http2 = true
   idle_timeout = 30
 
@@ -43,13 +43,13 @@ resource "aws_alb_target_group" "target_group" {
   deregistration_delay = 5
 
   health_check {
-    enabled             = true
-    interval            = 15
-    path                = var.health_check_path
-    port                = var.health_check_port
-    protocol            = var.protocol
+    enabled  = true
+    interval = 15
+    path     = var.health_check_path
+    port     = var.health_check_port
+    protocol = var.protocol
 
-    timeout             = 10
+    timeout = 10
 
     healthy_threshold   = 2
     unhealthy_threshold = 3
