@@ -25,6 +25,7 @@ jobs:
   terraform:
     name: Terraform Apply
     runs-on: ubuntu-latest
+    needs: cleanup-check
 
     defaults:
       run:
@@ -51,8 +52,37 @@ jobs:
       - name: Terraform Version
         run: terraform version
 
+      - name: Create Terraform State Bucket
+        run: |
+          BUCKET="ecs-fullstack-terraform-state-354482028472"
+          REGION="${{ secrets.AWS_DEFAULT_REGION }}"
+
+          if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+            echo "Terraform state bucket already exists."
+          else
+            echo "Creating Terraform state bucket..."
+
+            if [ "$REGION" = "us-east-1" ]; then
+              aws s3api create-bucket \
+                --bucket "$BUCKET" \
+                --region "$REGION"
+            else
+              aws s3api create-bucket \
+                --bucket "$BUCKET" \
+                --region "$REGION" \
+                --create-bucket-configuration \
+                LocationConstraint="$REGION"
+            fi
+          fi
+
+          echo "Enabling bucket versioning..."
+
+          aws s3api put-bucket-versioning \
+            --bucket "$BUCKET" \
+            --versioning-configuration Status=Enabled
+
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -reconfigure
 
       - name: Terraform Format
         run: terraform fmt -check -recursive
