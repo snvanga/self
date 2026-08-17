@@ -1,21 +1,11 @@
 name: Deploy ECS Fullstack Application
-#test
+
 on:
   push:
-#  workflow_run:
-    # workflows:
-    #   - "Cleanup ECS Fullstack AWS Resources"
-    # types:
-    #   - completed
     branches:
       - main
       - snv-test
-
   workflow_dispatch:
-
-# concurrency:
-#   group: repository-deployment
-#   cancel-in-progress: false
 
 permissions:
   contents: read
