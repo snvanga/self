@@ -7,7 +7,9 @@ on:
       - snv-test
 
   workflow_dispatch:
-
+concurrency:
+  group: repository-deployment
+  cancel-in-progress: false
 permissions:
   contents: read
 
