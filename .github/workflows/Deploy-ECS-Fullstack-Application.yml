@@ -3,7 +3,7 @@ name: Deploy ECS Fullstack Application
 on:
   workflow_run:
     workflows:
-      - "AWS Cleanup"
+      - "Cleanup ECS Fullstack AWS Resources"
     types:
       - completed
     branches:
