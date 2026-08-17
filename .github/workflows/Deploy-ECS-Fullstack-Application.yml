@@ -1,7 +1,8 @@
 name: Deploy ECS Fullstack Application
 
 on:
-  workflow_run:
+  push:
+#  workflow_run:
     # workflows:
     #   - "Cleanup ECS Fullstack AWS Resources"
     # types:
@@ -12,9 +13,9 @@ on:
 
   workflow_dispatch:
 
-concurrency:
-  group: repository-deployment
-  cancel-in-progress: false
+# concurrency:
+#   group: repository-deployment
+#   cancel-in-progress: false
 
 permissions:
   contents: read
